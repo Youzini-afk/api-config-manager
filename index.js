@@ -1152,12 +1152,17 @@ function getPopupHostByContent(popupContent) {
     return fallback;
 }
 
-function closeApiConfigPopup() {
-    const popupHost = getPopupHostByContent($('.api-config-popup'));
+function closeApiConfigPopup(triggerElement = null) {
+    let popupHost = triggerElement
+        ? $(triggerElement).closest('.popup, .dialogue_popup, .modal, .popup-window')
+        : getPopupHostByContent($('.api-config-popup'));
+    if (!popupHost.length) {
+        popupHost = getPopupHostByContent($('.api-config-popup'));
+    }
     if (!popupHost.length) return;
 
     const closeByText = popupHost
-        .find('button, .menu_button, input[type="button"], .popup-button, a')
+        .find('button, .menu_button, input[type="button"], .popup-button, a, #dialogue_popup_ok, #dialogue_popup_cancel')
         .filter(function () {
             const text = String($(this).text() || $(this).val() || '').trim();
             return text === '关闭' || text.toLowerCase() === 'close';
@@ -1176,7 +1181,11 @@ function closeApiConfigPopup() {
         return;
     }
 
-    $(document).trigger($.Event('keydown', { key: 'Escape', code: 'Escape', which: 27, keyCode: 27 }));
+    const escapeEventInit = { key: 'Escape', code: 'Escape', which: 27, keyCode: 27, bubbles: true };
+    window.dispatchEvent(new KeyboardEvent('keydown', escapeEventInit));
+    window.dispatchEvent(new KeyboardEvent('keyup', escapeEventInit));
+    $(document).trigger($.Event('keydown', escapeEventInit));
+    $(document).trigger($.Event('keyup', escapeEventInit));
 }
 
 function normalizePopupCloseButton(popupContent) {
@@ -1326,7 +1335,7 @@ function buildPopupSettingsHtml() {
                             <button id="api-config-update" class="menu_button api-config-update-btn" title="检查并更新扩展">
                                 <i class="fa-solid fa-download"></i>
                             </button>
-                            <button id="api-config-close-inline" class="menu_button api-config-close-inline" title="关闭面板">
+                            <button id="api-config-close-inline" type="button" class="menu_button api-config-close-inline" title="关闭面板">
                                 关闭
                             </button>
                         </div>
@@ -1471,8 +1480,10 @@ function bindEvents() {
     });
 
     // 右上角关闭按钮
-    $(document).on('click', '#api-config-close-inline', function () {
-        closeApiConfigPopup();
+    $(document).on('click', '#api-config-close-inline', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeApiConfigPopup(this);
     });
 
     // 取消编辑配置
