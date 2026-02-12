@@ -120,10 +120,17 @@
     color: #9ef1bb;
 }
 
+.api-config-sort-toggle.is-usage {
+    border-color: #5f5520;
+    background: rgba(166, 138, 42, 0.20);
+    color: #ffe69b;
+}
+
 .api-config-provider-list {
     flex: 1;
     overflow: auto;
     padding-right: 2px;
+    -webkit-overflow-scrolling: touch;
 }
 
 .api-config-list-group-header {
@@ -265,6 +272,7 @@
 .api-config-main {
     padding: 16px;
     background: #0b0f16;
+    min-width: 0;
 }
 
 .api-config-main-header {
@@ -554,44 +562,145 @@
 }
 
 @media (max-width: 1080px) {
+    .api-config-popup {
+        border-radius: 14px;
+    }
+
     .api-config-shell {
         grid-template-columns: 1fr;
+        min-height: auto;
+        max-height: min(86vh, 820px);
     }
 
     .api-config-sidebar {
         border-right: none;
         border-bottom: 1px solid #1d2530;
-        max-height: 320px;
+        padding: 10px;
+        gap: 8px;
     }
 
     .api-config-provider-list {
-        max-height: 220px;
+        max-height: min(30vh, 260px);
+    }
+
+    .api-config-main {
+        padding: 12px;
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
     #api-config-editor-name {
-        max-width: 260px;
-        font-size: 24px;
+        max-width: 100%;
+        font-size: 22px;
     }
 }
 
 @media (max-width: 720px) {
-    .api-config-main {
-        padding: 12px;
+    .api-config-popup {
+        border-radius: 12px;
+    }
+
+    .api-config-shell {
+        max-height: min(88vh, 760px);
+    }
+
+    .api-config-sidebar {
+        padding: 8px;
+    }
+
+    #api-config-search {
+        height: 36px;
+        font-size: 13px;
+        border-radius: 10px;
+    }
+
+    .api-config-sort-toggle,
+    .api-config-new-entry {
+        height: 34px;
+        font-size: 14px;
+    }
+
+    .api-config-provider-list {
+        max-height: min(34vh, 280px);
+        padding-right: 0;
+    }
+
+    .api-config-provider-item {
+        padding: 7px 8px;
+        border-radius: 10px;
+    }
+
+    .api-config-provider-avatar {
+        width: 26px;
+        height: 26px;
+        font-size: 12px;
+    }
+
+    .api-config-provider-name {
+        font-size: 13px;
+    }
+
+    .api-config-provider-sub {
+        font-size: 10px;
+    }
+
+    .api-config-provider-state {
+        min-width: 34px;
+        font-size: 10px;
     }
 
     .api-config-main-header {
         flex-direction: column;
         align-items: flex-start;
+        gap: 8px;
+        padding-bottom: 8px;
     }
 
     .api-config-main-tools {
         width: 100%;
-        justify-content: space-between;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .api-config-source-chip {
+        font-size: 11px;
+        padding: 3px 8px;
+    }
+
+    .api-config-update-btn {
+        width: 32px;
+        min-width: 32px;
+        height: 32px;
     }
 
     #api-config-editor-name {
-        font-size: 21px;
+        font-size: 19px;
         max-width: 100%;
+    }
+
+    #api-config-editor-mode {
+        font-size: 10px;
+    }
+
+    .api-config-main-meta {
+        margin-top: 8px;
+        font-size: 11px;
+    }
+
+    .api-config-form {
+        margin-top: 10px;
+    }
+
+    .api-config-label {
+        font-size: 13px;
+        margin: 10px 0 6px;
+    }
+
+    .api-config-form .text_pole {
+        height: 36px;
+        font-size: 13px;
+        border-radius: 9px;
     }
 
     .api-config-inline-double {
@@ -600,19 +709,56 @@
 
     .api-config-inline-field {
         flex-direction: column;
+        gap: 6px;
     }
 
     .api_config_settings .button-container {
-        flex-wrap: wrap !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 6px !important;
     }
 
     .api-config-editor-actions {
         margin-left: 0;
         width: 100%;
-        justify-content: flex-end;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+
+    #api-config-save,
+    #api-config-cancel,
+    #api-config-apply-current,
+    #api-config-delete-current {
+        width: 100%;
+        min-width: 0;
+    }
+
+    #api-config-delete-current {
+        height: 34px;
+    }
+
+    #api-config-source-hint {
+        font-size: 11px;
+        line-height: 1.4;
+    }
+
+    .api-config-inline-launcher {
+        padding: 9px;
+    }
+
+    .api-config-inline-launcher-title {
+        font-size: 13px;
+    }
+
+    .api-config-inline-launcher-btn {
+        height: 32px;
+        font-size: 12px;
     }
 
     #api-config-fetch-models {
         height: 36px;
+        width: 100%;
+        min-width: 0;
     }
 }

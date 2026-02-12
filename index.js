@@ -42,6 +42,7 @@ const SOURCE_SECRET_KEYS = {
 
 const LIST_SORT_MODES = {
     GROUP: 'group',
+    USAGE: 'usage',
     NAME: 'name',
 };
 
@@ -261,7 +262,7 @@ function getConfigGroup(config) {
 
 function getListSortMode() {
     const mode = extension_settings?.[MODULE_NAME]?.listSortMode;
-    return mode === LIST_SORT_MODES.NAME ? LIST_SORT_MODES.NAME : LIST_SORT_MODES.GROUP;
+    return Object.values(LIST_SORT_MODES).includes(mode) ? mode : LIST_SORT_MODES.GROUP;
 }
 
 function getModelSelectSelector(source) {
@@ -1203,11 +1204,22 @@ function renderConfigList() {
     $('#api-config-inline-count').text(String(configs.length));
     const sortButton = $('#api-config-sort-toggle');
     if (sortButton.length) {
-        const isGroupSort = sortMode === LIST_SORT_MODES.GROUP;
+        const buttonLabelMap = {
+            [LIST_SORT_MODES.GROUP]: '按组排列',
+            [LIST_SORT_MODES.USAGE]: '按习惯排列',
+            [LIST_SORT_MODES.NAME]: '按名称排列',
+        };
+        const nextModeMap = {
+            [LIST_SORT_MODES.GROUP]: LIST_SORT_MODES.USAGE,
+            [LIST_SORT_MODES.USAGE]: LIST_SORT_MODES.NAME,
+            [LIST_SORT_MODES.NAME]: LIST_SORT_MODES.GROUP,
+        };
+        const nextLabel = buttonLabelMap[nextModeMap[sortMode]] || '按组排列';
         sortButton
-            .toggleClass('is-group', isGroupSort)
-            .text(isGroupSort ? '按组排列' : '按名称排列')
-            .attr('title', isGroupSort ? '当前按组排列，点击切换为按名称' : '当前按名称排列，点击切换为按组');
+            .toggleClass('is-group', sortMode === LIST_SORT_MODES.GROUP)
+            .toggleClass('is-usage', sortMode === LIST_SORT_MODES.USAGE)
+            .text(buttonLabelMap[sortMode] || '按组排列')
+            .attr('title', `当前${buttonLabelMap[sortMode] || '按组排列'}，点击切换为${nextLabel}`);
     }
 
     const keyword = String($('#api-config-search').val() || '').trim().toLowerCase();
@@ -1312,8 +1324,11 @@ function renderConfigList() {
                 ordered.push(bucket.item);
             }
         }
-    } else {
+    } else if (sortMode === LIST_SORT_MODES.USAGE) {
         enhanced.sort(byUsageThenName);
+        ordered.push(...enhanced);
+    } else {
+        enhanced.sort(byName);
         ordered.push(...enhanced);
     }
 
@@ -1326,7 +1341,7 @@ function renderConfigList() {
             : (config.reverseProxy || '默认连接');
         const displayName = escapeHtml(config.name || `配置 ${index + 1}`);
         const displaySub = escapeHtml(`${sourceLabel} · ${endpointSummary}`);
-        const groupLabel = sortMode === LIST_SORT_MODES.NAME
+        const groupLabel = sortMode !== LIST_SORT_MODES.GROUP
             ? `<span class="api-config-provider-group">${escapeHtml(configGroup)}</span>`
             : '';
         const avatarText = escapeHtml((config.name || 'A').charAt(0).toLowerCase());
@@ -1393,8 +1408,12 @@ function updateEditorHeader() {
 
 function toggleListSortMode() {
     const currentMode = getListSortMode();
-    extension_settings[MODULE_NAME].listSortMode =
-        currentMode === LIST_SORT_MODES.GROUP ? LIST_SORT_MODES.NAME : LIST_SORT_MODES.GROUP;
+    const nextModeMap = {
+        [LIST_SORT_MODES.GROUP]: LIST_SORT_MODES.USAGE,
+        [LIST_SORT_MODES.USAGE]: LIST_SORT_MODES.NAME,
+        [LIST_SORT_MODES.NAME]: LIST_SORT_MODES.GROUP,
+    };
+    extension_settings[MODULE_NAME].listSortMode = nextModeMap[currentMode] || LIST_SORT_MODES.GROUP;
     saveSettingsDebounced();
     renderConfigList();
 }
