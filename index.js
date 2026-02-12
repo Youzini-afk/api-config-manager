@@ -45,6 +45,9 @@ const LIST_SORT_MODES = {
     NAME: 'name',
 };
 
+const USAGE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_USAGE_EVENTS = 2000;
+
 const AUTO_GROUP_HOST_SKIP = new Set([
     'api',
     'www',
@@ -93,6 +96,7 @@ const defaultSettings = {
     collapsedGroups: {}, // 存储折叠状态: {groupName: boolean}
     listSortMode: LIST_SORT_MODES.GROUP,
     lastAppliedSignature: null,
+    usageHistory: [],
 };
 
 // 编辑状态
@@ -314,6 +318,54 @@ function hasConfigMatchingSignature(configs, signature) {
     return configs.some(config => isSameConfigSignature(buildConfigRuntimeSignature(config), signature));
 }
 
+function normalizeUsageHistory(history, now = Date.now()) {
+    const cutoff = now - USAGE_WINDOW_MS;
+    const normalized = [];
+    if (!Array.isArray(history)) return normalized;
+
+    for (const item of history) {
+        if (!item || typeof item !== 'object') continue;
+        const ts = Number(item.ts);
+        if (!Number.isFinite(ts) || ts < cutoff) continue;
+        const signature = item.signature;
+        if (!signature || typeof signature !== 'object') continue;
+        normalized.push({
+            ts,
+            signature: {
+                source: normalizeSource(signature.source),
+                endpoint: String(signature.endpoint || '').trim(),
+                model: String(signature.model || '').trim(),
+                name: String(signature.name || '').trim(),
+            },
+        });
+    }
+
+    if (normalized.length > MAX_USAGE_EVENTS) {
+        return normalized.slice(normalized.length - MAX_USAGE_EVENTS);
+    }
+
+    return normalized;
+}
+
+function getUsageHistory() {
+    const state = extension_settings?.[MODULE_NAME];
+    return Array.isArray(state?.usageHistory) ? state.usageHistory : [];
+}
+
+function getConfigUsageScore(config, now = Date.now(), history = getUsageHistory()) {
+    const signature = buildConfigRuntimeSignature(config);
+    const cutoff = now - USAGE_WINDOW_MS;
+    let score = 0;
+    for (const item of history) {
+        if (!item || typeof item !== 'object') continue;
+        if (Number(item.ts) < cutoff) continue;
+        if (isSameConfigSignature(item.signature, signature)) {
+            score += 1;
+        }
+    }
+    return score;
+}
+
 function findActiveConfigIndex(configs) {
     if (!Array.isArray(configs) || configs.length === 0) return -1;
 
@@ -440,6 +492,17 @@ function initSettings() {
         migrated = true;
     }
 
+    if (!Array.isArray(extension_settings[MODULE_NAME].usageHistory)) {
+        extension_settings[MODULE_NAME].usageHistory = [];
+        migrated = true;
+    } else {
+        const normalizedHistory = normalizeUsageHistory(extension_settings[MODULE_NAME].usageHistory);
+        if (normalizedHistory.length !== extension_settings[MODULE_NAME].usageHistory.length) {
+            extension_settings[MODULE_NAME].usageHistory = normalizedHistory;
+            migrated = true;
+        }
+    }
+
     // 兼容旧配置结构
     for (const config of extension_settings[MODULE_NAME].configs) {
         if (!config || typeof config !== 'object') continue;
@@ -529,6 +592,16 @@ async function applyConfig(config) {
 
         // 记录最近一次应用的配置，用于左侧状态高亮判定
         extension_settings[MODULE_NAME].lastAppliedSignature = buildConfigRuntimeSignature(config, source);
+        const now = Date.now();
+        const usageHistory = normalizeUsageHistory(extension_settings[MODULE_NAME].usageHistory, now);
+        usageHistory.push({
+            ts: now,
+            signature: buildConfigRuntimeSignature(config, source),
+        });
+        if (usageHistory.length > MAX_USAGE_EVENTS) {
+            usageHistory.splice(0, usageHistory.length - MAX_USAGE_EVENTS);
+        }
+        extension_settings[MODULE_NAME].usageHistory = usageHistory;
 
         // 保存设置
         saveSettingsDebounced();
@@ -1167,23 +1240,87 @@ function renderConfigList() {
     }
 
     const collator = new Intl.Collator('zh-Hans-CN', { sensitivity: 'base', numeric: true });
+    const usageHistory = getUsageHistory();
+    const now = Date.now();
+    const enhanced = filtered.map(item => ({
+        ...item,
+        groupName: getConfigGroup(item.config) || '未分组',
+        usageScore: getConfigUsageScore(item.config, now, usageHistory),
+    }));
+
     const byName = (a, b) => collator.compare(String(a.config.name || ''), String(b.config.name || ''));
+    const byUsageThenName = (a, b) => {
+        if (b.usageScore !== a.usageScore) return b.usageScore - a.usageScore;
+        return byName(a, b);
+    };
+
+    const ordered = [];
+    const groupedHeaderNames = new Set();
+
     if (sortMode === LIST_SORT_MODES.GROUP) {
-        filtered.sort((a, b) => {
-            const aGroup = getConfigGroup(a.config) || '未分组';
-            const bGroup = getConfigGroup(b.config) || '未分组';
-            const groupCompare = collator.compare(aGroup, bGroup);
-            if (groupCompare !== 0) return groupCompare;
-            return byName(a, b);
+        const groupMap = new Map();
+        for (const item of enhanced) {
+            const key = item.groupName;
+            if (!groupMap.has(key)) {
+                groupMap.set(key, []);
+            }
+            groupMap.get(key).push(item);
+        }
+
+        const multiGroups = [];
+        const singleItems = [];
+
+        for (const [groupName, items] of groupMap.entries()) {
+            if (items.length > 1) {
+                multiGroups.push({
+                    groupName,
+                    items,
+                    groupUsage: items.reduce((sum, it) => sum + it.usageScore, 0),
+                });
+            } else {
+                singleItems.push(items[0]);
+            }
+        }
+
+        const buckets = [
+            ...multiGroups.map(group => ({
+                type: 'group',
+                key: group.groupName,
+                rank: group.groupUsage,
+                group,
+            })),
+            ...singleItems.map(item => ({
+                type: 'single',
+                key: String(item.config?.name || ''),
+                rank: item.usageScore,
+                item,
+            })),
+        ];
+
+        buckets.sort((a, b) => {
+            if (b.rank !== a.rank) return b.rank - a.rank;
+            return collator.compare(a.key, b.key);
         });
+
+        for (const bucket of buckets) {
+            if (bucket.type === 'group') {
+                const group = bucket.group;
+                group.items.sort(byUsageThenName);
+                groupedHeaderNames.add(group.groupName);
+                ordered.push(...group.items);
+            } else {
+                ordered.push(bucket.item);
+            }
+        }
     } else {
-        filtered.sort(byName);
+        enhanced.sort(byUsageThenName);
+        ordered.push(...enhanced);
     }
 
     let lastGroup = '';
-    filtered.forEach(({ config, index }) => {
+    ordered.forEach(({ config, index, groupName }) => {
         const sourceLabel = getSourceLabel(config.source);
-        const configGroup = getConfigGroup(config) || '未分组';
+        const configGroup = groupName || '未分组';
         const endpointSummary = normalizeSource(config.source) === CHAT_COMPLETION_SOURCES.CUSTOM
             ? (config.customUrl || config.url || '未填写Custom URL')
             : (config.reverseProxy || '默认连接');
@@ -1198,7 +1335,8 @@ function renderConfigList() {
         const stateClass = isEnabled ? 'is-on' : 'is-off';
         const stateText = isEnabled ? 'ON' : 'OFF';
 
-        if (sortMode === LIST_SORT_MODES.GROUP && configGroup !== lastGroup) {
+        const shouldShowGroupHeader = sortMode === LIST_SORT_MODES.GROUP && groupedHeaderNames.has(configGroup);
+        if (shouldShowGroupHeader && configGroup !== lastGroup) {
             const groupHeader = $(`
                 <div class="api-config-list-group-header">
                     <span>${escapeHtml(configGroup)}</span>
