@@ -147,6 +147,27 @@
     border-radius: 8px;
 }
 
+.api-config-legacy-save-row {
+    align-items: stretch;
+}
+
+#api-config-legacy-save,
+#api-config-legacy-cancel {
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    border-radius: 9px;
+    padding: 0 12px !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    line-height: 1.2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .api-config-shell {
     display: grid;
     grid-template-columns: 300px 1fr;

@@ -1014,31 +1014,63 @@ function setLegacyEditMode(isEditing) {
 
 function resetLegacyForm() {
     legacyEditingIndex = -1;
+    $('#api-config-legacy-source').val(CHAT_COMPLETION_SOURCES.CUSTOM);
     $('#api-config-legacy-name').val('');
     $('#api-config-legacy-url').val('');
     $('#api-config-legacy-key').val('');
+    $('#api-config-legacy-reverse-proxy').val('');
+    $('#api-config-legacy-proxy-password').val('');
     $('#api-config-legacy-model').val('');
     $('#api-config-legacy-model-select').hide().empty().append('<option value="">选择模型...</option>');
+    updateLegacyFormBySource(CHAT_COMPLETION_SOURCES.CUSTOM);
     setLegacyEditMode(false);
 }
 
-function buildLegacyCustomConfig(name, customUrl, key, model) {
+function updateLegacyFormBySource(sourceValue) {
+    const source = normalizeSource(sourceValue);
+    const $source = $('#api-config-legacy-source');
+    const $customUrl = $('#api-config-legacy-url');
+    const $apiKey = $('#api-config-legacy-key');
+    const $reverseProxy = $('#api-config-legacy-reverse-proxy');
+    const $proxyPassword = $('#api-config-legacy-proxy-password');
+    const $hint = $('#api-config-legacy-source-hint');
+
+    if ($source.length) {
+        $source.val(source);
+    }
+
+    if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
+        $customUrl.show().attr('placeholder', 'Custom API URL (例如: https://api.openai.com/v1)');
+        $apiKey.attr('placeholder', 'Custom API密钥 (可选)');
+        $reverseProxy.hide();
+        $proxyPassword.hide();
+        $hint.text('Custom：使用OpenAI兼容接口。');
+    } else {
+        $customUrl.hide();
+        $apiKey.attr('placeholder', 'Google AI Studio API Key (可选；不填则使用酒馆已保存的密钥)');
+        $reverseProxy.show().attr('placeholder', '反代服务器URL (可选；留空使用默认)');
+        $proxyPassword.show().attr('placeholder', '反代密码/Key (可选；反代需要时填写)');
+        $hint.text('Google AI Studio：支持直接Key或使用反代。');
+    }
+}
+
+function buildLegacyConfig(name, source, customUrl, key, reverseProxy, proxyPassword, model) {
     const autoGroup = detectAutoGroup({
         name,
-        source: CHAT_COMPLETION_SOURCES.CUSTOM,
+        source,
         customUrl,
-        reverseProxy: '',
+        reverseProxy,
     });
 
     return {
         name,
         group: autoGroup || undefined,
-        source: CHAT_COMPLETION_SOURCES.CUSTOM,
-        url: customUrl,
-        customUrl,
+        source,
+        url: source === CHAT_COMPLETION_SOURCES.CUSTOM ? customUrl : undefined,
+        customUrl: source === CHAT_COMPLETION_SOURCES.CUSTOM ? customUrl : undefined,
         key,
-        reverseProxy: undefined,
-        proxyPassword: undefined,
+        reverseProxy: source === CHAT_COMPLETION_SOURCES.MAKERSUITE ? reverseProxy : undefined,
+        proxyPassword: source === CHAT_COMPLETION_SOURCES.MAKERSUITE ? proxyPassword : undefined,
         model: model || undefined,
         secretId: undefined,
         secretIds: undefined,
@@ -1046,9 +1078,12 @@ function buildLegacyCustomConfig(name, customUrl, key, model) {
 }
 
 function saveLegacyConfig() {
+    const source = normalizeSource($('#api-config-legacy-source').val());
     const name = String($('#api-config-legacy-name').val() || '').trim();
     const customUrl = String($('#api-config-legacy-url').val() || '').trim();
     const key = String($('#api-config-legacy-key').val() || '').trim();
+    const reverseProxy = String($('#api-config-legacy-reverse-proxy').val() || '').trim();
+    const proxyPassword = String($('#api-config-legacy-proxy-password').val() || '').trim();
     const model = String($('#api-config-legacy-model').val() || '').trim();
 
     if (!name) {
@@ -1056,12 +1091,18 @@ function saveLegacyConfig() {
         return;
     }
 
-    if (!customUrl && !key) {
-        toastr.error('请至少输入URL或密钥', 'API配置管理器');
-        return;
+    if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
+        if (!customUrl && !key) {
+            toastr.error('Custom配置请至少输入URL或密钥', 'API配置管理器');
+            return;
+        }
+    } else if (source === CHAT_COMPLETION_SOURCES.MAKERSUITE) {
+        if (!reverseProxy && !key) {
+            toastr.info('未填写反代URL和密钥：将使用酒馆已保存的Google AI Studio密钥（如已配置）', 'API配置管理器');
+        }
     }
 
-    const config = buildLegacyCustomConfig(name, customUrl, key, model);
+    const config = buildLegacyConfig(name, source, customUrl, key, reverseProxy, proxyPassword, model);
     const configs = extension_settings[MODULE_NAME].configs;
     const targetIndex = (legacyEditingIndex >= 0 && legacyEditingIndex < configs.length)
         ? legacyEditingIndex
@@ -1069,19 +1110,21 @@ function saveLegacyConfig() {
 
     if (targetIndex >= 0) {
         const previousConfig = configs[targetIndex];
-        const secretKey = SOURCE_SECRET_KEYS[CHAT_COMPLETION_SOURCES.CUSTOM];
+        const secretKey = SOURCE_SECRET_KEYS[source];
         const prevSource = normalizeSource(previousConfig?.source);
         const prevSecretId =
             (previousConfig?.secretIds && typeof previousConfig.secretIds === 'object' && secretKey ? previousConfig.secretIds[secretKey] : null) ||
-            previousConfig?.secretId;
+            (source === CHAT_COMPLETION_SOURCES.CUSTOM ? previousConfig?.secretId : null);
 
-        if (prevSecretId && previousConfig?.key === config.key && prevSource === CHAT_COMPLETION_SOURCES.CUSTOM) {
+        if (prevSecretId && previousConfig?.key === config.key && prevSource === source) {
             config.secretId = previousConfig.secretId;
             config.secretIds = previousConfig.secretIds;
         }
 
         configs[targetIndex] = config;
+        const syncCount = maybeSyncConfigsWithSameEndpoint(targetIndex, previousConfig, config);
         toastr.success(`已更新配置: ${name}`, 'API配置管理器');
+        showEndpointSyncToastIfNeeded(syncCount, source);
     } else {
         configs.push(config);
         toastr.success(`已保存配置: ${name}`, 'API配置管理器');
@@ -1096,24 +1139,28 @@ function editLegacyConfig(index) {
     const config = extension_settings[MODULE_NAME].configs[index];
     if (!config) return;
 
-    if (normalizeSource(config.source) !== CHAT_COMPLETION_SOURCES.CUSTOM) {
-        toastr.info('该配置不是Custom类型，请在新面板中编辑', 'API配置管理器');
-        return;
-    }
-
+    const source = normalizeSource(config.source);
     legacyEditingIndex = index;
+    $('#api-config-legacy-source').val(source);
     $('#api-config-legacy-name').val(config.name || '');
     $('#api-config-legacy-url').val((typeof config.customUrl === 'string' ? config.customUrl : config.url) || '');
     $('#api-config-legacy-key').val(config.key || '');
+    $('#api-config-legacy-reverse-proxy').val(config.reverseProxy || '');
+    $('#api-config-legacy-proxy-password').val(config.proxyPassword || '');
     $('#api-config-legacy-model').val(config.model || '');
+    updateLegacyFormBySource(source);
     setLegacyEditMode(true);
 }
 
 async function fetchLegacyModels() {
+    const source = normalizeSource($('#api-config-legacy-source').val());
     const customUrl = String($('#api-config-legacy-url').val() || '').trim();
     const apiKey = String($('#api-config-legacy-key').val() || '').trim();
-    if (!customUrl) {
-        toastr.error('请先输入URL', 'API配置管理器');
+    const reverseProxy = String($('#api-config-legacy-reverse-proxy').val() || '').trim();
+    const proxyPassword = String($('#api-config-legacy-proxy-password').val() || '').trim();
+
+    if (source === CHAT_COMPLETION_SOURCES.CUSTOM && !customUrl) {
+        toastr.error('请先输入Custom URL', 'API配置管理器');
         return;
     }
 
@@ -1122,17 +1169,26 @@ async function fetchLegacyModels() {
     button.text('获取中...').prop('disabled', true);
 
     try {
-        if (apiKey) {
+        if (source === CHAT_COMPLETION_SOURCES.CUSTOM && apiKey) {
             await ensureSecretActive(SECRET_KEYS.CUSTOM, apiKey, 'ACM: Legacy fetch models');
+        } else if (source === CHAT_COMPLETION_SOURCES.MAKERSUITE && !reverseProxy && apiKey) {
+            await ensureSecretActive(SECRET_KEYS.MAKERSUITE, apiKey, 'ACM: Legacy fetch models');
+        }
+
+        const requestData = {
+            chat_completion_source: source,
+            reverse_proxy: reverseProxy,
+            proxy_password: proxyPassword,
+        };
+
+        if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
+            requestData.custom_url = customUrl;
         }
 
         const response = await fetch('/api/backends/chat-completions/status', {
             method: 'POST',
             headers: getRequestHeaders(),
-            body: JSON.stringify({
-                chat_completion_source: CHAT_COMPLETION_SOURCES.CUSTOM,
-                custom_url: customUrl,
-            }),
+            body: JSON.stringify(requestData),
             cache: 'no-cache',
         });
 
@@ -1181,8 +1237,9 @@ function renderLegacyInlineList() {
         const endpoint = source === CHAT_COMPLETION_SOURCES.CUSTOM
             ? (config.customUrl || config.url || '未填写URL')
             : (config.reverseProxy || '默认连接');
+        const endpointLabel = source === CHAT_COMPLETION_SOURCES.CUSTOM ? 'URL' : '反代地址';
         const model = config.model || '未设置模型';
-        const canEditInLegacy = source === CHAT_COMPLETION_SOURCES.CUSTOM;
+        const sourceLabel = getSourceLabel(source);
         const stateText = activeConfigIndex === index ? 'ON' : 'OFF';
         const stateClass = activeConfigIndex === index ? 'is-on' : 'is-off';
 
@@ -1192,11 +1249,12 @@ function renderLegacyInlineList() {
                     <div class="api-config-legacy-item-name">${escapeHtml(config.name || `配置 ${index + 1}`)}</div>
                     <span class="api-config-provider-state ${stateClass}">${stateText}</span>
                 </div>
-                <div class="api-config-legacy-item-sub">URL: ${escapeHtml(endpoint)}</div>
+                <div class="api-config-legacy-item-sub">来源: ${escapeHtml(sourceLabel)}</div>
+                <div class="api-config-legacy-item-sub">${escapeHtml(endpointLabel)}: ${escapeHtml(endpoint)}</div>
                 <div class="api-config-legacy-item-sub">模型: ${escapeHtml(model)}</div>
                 <div class="api-config-legacy-item-actions">
                     <button class="menu_button api-config-legacy-apply" data-index="${index}">应用</button>
-                    <button class="menu_button api-config-legacy-edit" data-index="${index}" ${canEditInLegacy ? '' : 'disabled'}>编辑</button>
+                    <button class="menu_button api-config-legacy-edit" data-index="${index}">编辑</button>
                     <button class="menu_button api-config-legacy-delete" data-index="${index}">删除</button>
                 </div>
             </div>
@@ -1984,9 +2042,15 @@ function buildInlineApiEntryHtml() {
                     <div class="api-config-legacy-section">
                         <h4>添加或编辑配置</h4>
                         <div class="flex-container flexFlowColumn flexGap5">
+                            <select id="api-config-legacy-source" class="text_pole">
+                                <option value="${CHAT_COMPLETION_SOURCES.CUSTOM}">Custom (OpenAI兼容)</option>
+                                <option value="${CHAT_COMPLETION_SOURCES.MAKERSUITE}">Google AI Studio</option>
+                            </select>
                             <input type="text" id="api-config-legacy-name" placeholder="配置名称" class="text_pole">
                             <input type="text" id="api-config-legacy-url" placeholder="API URL (例如: https://api.openai.com/v1)" class="text_pole">
                             <input type="password" id="api-config-legacy-key" placeholder="API密钥 (可选)" class="text_pole">
+                            <input type="text" id="api-config-legacy-reverse-proxy" placeholder="反代服务器URL (可选)" class="text_pole" style="display: none;">
+                            <input type="password" id="api-config-legacy-proxy-password" placeholder="反代密码/Key (可选)" class="text_pole" style="display: none;">
                             <div class="flex-container flexGap5">
                                 <input type="text" id="api-config-legacy-model" placeholder="首选模型 (可选)" class="text_pole" style="flex: 1;">
                                 <button id="api-config-legacy-fetch-models" class="menu_button" style="white-space: nowrap;">获取模型</button>
@@ -1994,12 +2058,12 @@ function buildInlineApiEntryHtml() {
                             <select id="api-config-legacy-model-select" class="text_pole" style="display: none;">
                                 <option value="">选择模型...</option>
                             </select>
-                            <div class="flex-container flexGap5">
+                            <div class="flex-container flexGap5 api-config-legacy-save-row">
                                 <button id="${INLINE_API_LEGACY_SAVE_BTN_ID}" class="menu_button">保存配置</button>
                                 <button id="${INLINE_API_LEGACY_CANCEL_BTN_ID}" class="menu_button" style="display: none;">取消编辑</button>
                             </div>
                         </div>
-                        <small>经典方式默认保存为Custom配置；Google AI Studio请使用上方新面板。</small>
+                        <small id="api-config-legacy-source-hint">Custom：使用OpenAI兼容接口。</small>
                     </div>
                     <div class="api-config-legacy-section">
                         <h4>已保存配置</h4>
@@ -2176,6 +2240,9 @@ function bindEvents() {
     $(document).on('change', '#api-config-source', function () {
         updateFormBySource($(this).val());
     });
+    $(document).on('change', '#api-config-legacy-source', function () {
+        updateLegacyFormBySource($(this).val());
+    });
 
     // 更新扩展
     $(document).on('click', '#api-config-update', async function(e) {
@@ -2261,7 +2328,7 @@ function bindEvents() {
             saveNewConfig();
         }
     });
-    $(document).on('keypress', '#api-config-legacy-name, #api-config-legacy-url, #api-config-legacy-key, #api-config-legacy-model', function (e) {
+    $(document).on('keypress', '#api-config-legacy-name, #api-config-legacy-url, #api-config-legacy-key, #api-config-legacy-reverse-proxy, #api-config-legacy-proxy-password, #api-config-legacy-model', function (e) {
         if (e.which === 13) {
             saveLegacyConfig();
         }
