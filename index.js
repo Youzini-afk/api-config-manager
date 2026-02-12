@@ -76,6 +76,8 @@ const AUTO_GROUP_TLD_SKIP = new Set([
 
 const OPTIONS_MENU_SELECTOR = '#options .options-content';
 const OPTIONS_MENU_ITEM_ID = 'option_api_config_manager';
+const INLINE_API_ENTRY_ID = 'api_config_manager_inline_entry';
+const INLINE_API_ENTRY_OPEN_BTN_ID = 'api_config_manager_inline_open';
 
 // 扩展信息
 const EXTENSION_INFO = {
@@ -1012,6 +1014,7 @@ function renderConfigList() {
     const configs = extension_settings[MODULE_NAME].configs;
     const sortMode = getListSortMode();
     $('#api-config-summary-count').text(String(configs.length));
+    $('#api-config-inline-count').text(String(configs.length));
     const sortButton = $('#api-config-sort-toggle');
     if (sortButton.length) {
         const isGroupSort = sortMode === LIST_SORT_MODES.GROUP;
@@ -1150,42 +1153,6 @@ function getPopupHostByContent(popupContent) {
 
     const fallback = $('.popup:has(.api-config-popup), .dialogue_popup:has(.api-config-popup), .modal:has(.api-config-popup), .popup-window:has(.api-config-popup)').last();
     return fallback;
-}
-
-function closeApiConfigPopup(triggerElement = null) {
-    let popupHost = triggerElement
-        ? $(triggerElement).closest('.popup, .dialogue_popup, .modal, .popup-window')
-        : getPopupHostByContent($('.api-config-popup'));
-    if (!popupHost.length) {
-        popupHost = getPopupHostByContent($('.api-config-popup'));
-    }
-    if (!popupHost.length) return;
-
-    const closeByText = popupHost
-        .find('button, .menu_button, input[type="button"], .popup-button, a, #dialogue_popup_ok, #dialogue_popup_cancel')
-        .filter(function () {
-            const text = String($(this).text() || $(this).val() || '').trim();
-            return text === '关闭' || text.toLowerCase() === 'close';
-        })
-        .not('#api-config-close-inline')
-        .last();
-
-    if (closeByText.length) {
-        closeByText.trigger('click');
-        return;
-    }
-
-    const closeIcon = popupHost.find('.popup_close, .dialogue_popup_close, .fa-xmark, .fa-times').first();
-    if (closeIcon.length) {
-        closeIcon.trigger('click');
-        return;
-    }
-
-    const escapeEventInit = { key: 'Escape', code: 'Escape', which: 27, keyCode: 27, bubbles: true };
-    window.dispatchEvent(new KeyboardEvent('keydown', escapeEventInit));
-    window.dispatchEvent(new KeyboardEvent('keyup', escapeEventInit));
-    $(document).trigger($.Event('keydown', escapeEventInit));
-    $(document).trigger($.Event('keyup', escapeEventInit));
 }
 
 function normalizePopupCloseButton(popupContent) {
@@ -1335,9 +1302,6 @@ function buildPopupSettingsHtml() {
                             <button id="api-config-update" class="menu_button api-config-update-btn" title="检查并更新扩展">
                                 <i class="fa-solid fa-download"></i>
                             </button>
-                            <button id="api-config-close-inline" type="button" class="menu_button api-config-close-inline" title="关闭面板">
-                                关闭
-                            </button>
                         </div>
                     </div>
 
@@ -1429,6 +1393,64 @@ function ensureOptionsMenuEntry() {
     }
 }
 
+function buildInlineApiEntryHtml() {
+    return `
+        <div id="${INLINE_API_ENTRY_ID}" class="api-config-inline-launcher">
+            <div class="api-config-inline-launcher-title">
+                <i class="fa-solid fa-server"></i>
+                <span>API配置管理器</span>
+            </div>
+            <div class="api-config-inline-launcher-sub">
+                已保存 <span id="api-config-inline-count">0</span> 个配置
+            </div>
+            <button id="${INLINE_API_ENTRY_OPEN_BTN_ID}" class="menu_button api-config-inline-launcher-btn">
+                打开配置面板
+            </button>
+        </div>
+    `;
+}
+
+function ensureInlineApiEntry() {
+    if ($(`#${INLINE_API_ENTRY_ID}`).length) {
+        return true;
+    }
+
+    const customApiForm = $('#custom_form');
+    const entryHtml = buildInlineApiEntryHtml();
+
+    if (customApiForm.length) {
+        customApiForm.after(entryHtml);
+        return true;
+    }
+
+    const fallbackContainer = $('#openai_settings, #chat_completion_settings, #extensions_settings, #extensions_settings2').first();
+    if (fallbackContainer.length) {
+        fallbackContainer.append(entryHtml);
+        return true;
+    }
+
+    return false;
+}
+
+function scheduleEnsureInlineApiEntry() {
+    let attempts = 0;
+    const maxAttempts = 20;
+
+    const tryAttach = () => {
+        if (ensureInlineApiEntry()) {
+            $('#api-config-inline-count').text(String(extension_settings[MODULE_NAME].configs.length));
+            return;
+        }
+
+        attempts += 1;
+        if (attempts < maxAttempts) {
+            setTimeout(tryAttach, 1000);
+        }
+    };
+
+    tryAttach();
+}
+
 async function openConfigPopup() {
     editingIndex = -1;
     const popupContent = $(buildPopupSettingsHtml());
@@ -1450,6 +1472,7 @@ async function openConfigPopup() {
 // 创建UI
 async function createUI() {
     ensureOptionsMenuEntry();
+    scheduleEnsureInlineApiEntry();
 }
 
 
@@ -1461,6 +1484,13 @@ function bindEvents() {
         e.preventDefault();
         e.stopPropagation();
         $('#options_button').trigger('click');
+        await openConfigPopup();
+    });
+
+    // API连接页入口
+    $(document).on('click', `#${INLINE_API_ENTRY_OPEN_BTN_ID}`, async function (e) {
+        e.preventDefault();
+        e.stopPropagation();
         await openConfigPopup();
     });
 
@@ -1477,13 +1507,6 @@ function bindEvents() {
     $(document).on('click', '#api-config-new-entry', function () {
         cancelEditConfig(false);
         $('#api-config-name').focus();
-    });
-
-    // 右上角关闭按钮
-    $(document).on('click', '#api-config-close-inline', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        closeApiConfigPopup(this);
     });
 
     // 取消编辑配置
