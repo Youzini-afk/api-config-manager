@@ -450,6 +450,15 @@ function getEndpointFieldLabel(source) {
     return normalizeSource(source) === CHAT_COMPLETION_SOURCES.CUSTOM ? 'URL' : '反代地址';
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function getConfigEndpointValue(config, source = normalizeSource(config?.source)) {
     const normalized = normalizeSource(source);
     if (!config || typeof config !== 'object') return '';
@@ -624,6 +633,7 @@ function saveNewConfig() {
     $('#api-config-model').val('');
     $('#api-config-model-select').hide(); // 隐藏模型选择下拉框
     updateFormBySource($('#api-config-source').val());
+    updateEditorHeader();
     renderConfigList();
 }
 
@@ -802,8 +812,18 @@ function deleteConfig(index) {
     const config = extension_settings[MODULE_NAME].configs[index];
     if (confirm(`确定要删除配置 "${config.name}" 吗？`)) {
         extension_settings[MODULE_NAME].configs.splice(index, 1);
+        let handledByCancel = false;
+        if (editingIndex === index) {
+            cancelEditConfig(false);
+            handledByCancel = true;
+        } else if (editingIndex > index) {
+            editingIndex -= 1;
+        }
         saveSettingsDebounced();
-        renderConfigList();
+        if (!handledByCancel) {
+            updateEditorHeader();
+            renderConfigList();
+        }
         toastr.success(`已删除配置: ${config.name}`, 'API配置管理器');
     }
 }
@@ -816,75 +836,79 @@ function renderConfigList() {
     const configs = extension_settings[MODULE_NAME].configs;
     $('#api-config-summary-count').text(String(configs.length));
 
+    const keyword = String($('#api-config-search').val() || '').trim().toLowerCase();
+    const filtered = configs
+        .map((config, index) => ({ config, index }))
+        .filter(({ config }) => {
+            if (!keyword) return true;
+            const sourceLabel = getSourceLabel(config.source);
+            const endpoint = getConfigEndpointValue(config, config.source);
+            const text = [
+                config.name,
+                config.group,
+                sourceLabel,
+                endpoint,
+                config.model,
+            ].filter(Boolean).join(' ').toLowerCase();
+
+            return text.includes(keyword);
+        });
+
     if (configs.length === 0) {
-        container.append('<div class="api-config-empty">暂无保存的配置</div>');
+        container.append('<div class="api-config-empty">还没有配置，点击下方“+ 添加”创建第一个服务商</div>');
         return;
     }
 
-    // 按分组组织配置
-    const grouped = {};
-    configs.forEach((config, index) => {
-        const groupName = config.group || '未分组';
-        if (!grouped[groupName]) {
-            grouped[groupName] = [];
-        }
-        grouped[groupName].push({ config, index });
-    });
+    if (filtered.length === 0) {
+        container.append('<div class="api-config-empty">没有匹配的配置</div>');
+        return;
+    }
 
-    // 渲染每个分组
-    Object.keys(grouped).sort().forEach(groupName => {
-        const groupItems = grouped[groupName];
+    filtered.sort((a, b) => String(a.config.name || '').localeCompare(String(b.config.name || '')));
 
-        const groupHeader = $(`
-            <div class="api-config-group-header" data-group="${groupName}">
-                <i class="fa-solid fa-chevron-down"></i>
-                <span>${groupName}</span>
-                <span class="api-config-group-count">(${groupItems.length})</span>
-            </div>
-        `);
+    filtered.forEach(({ config, index }) => {
+        const sourceLabel = getSourceLabel(config.source);
+        const endpointSummary = normalizeSource(config.source) === CHAT_COMPLETION_SOURCES.CUSTOM
+            ? (config.customUrl || config.url || '未填写Custom URL')
+            : (config.reverseProxy || '默认连接');
+        const displayName = escapeHtml(config.name || `配置 ${index + 1}`);
+        const displaySub = escapeHtml(`${sourceLabel} · ${endpointSummary}`);
+        const groupLabel = config.group ? `<span class="api-config-provider-group">${escapeHtml(config.group)}</span>` : '';
+        const avatarText = escapeHtml((config.name || 'A').charAt(0).toLowerCase());
+        const isActive = editingIndex === index ? 'is-active' : '';
 
-        const groupContent = $('<div class="api-config-group-content"></div>');
-
-        groupItems.forEach(({ config, index }) => {
-            const sourceLabel = getSourceLabel(config.source);
-            const endpointSummary = normalizeSource(config.source) === CHAT_COMPLETION_SOURCES.CUSTOM
-                ? (config.customUrl || config.url || '未填写Custom URL')
-                : (config.reverseProxy ? `反代: ${config.reverseProxy}` : '使用默认AI Studio连接');
-            const secretSummary = config.key ? '保存时覆盖密钥' : '沿用现有密钥';
-            const configItem = $(`
-                <div class="api-config-item">
-                    <div class="api-config-info">
-                        <div class="api-config-name">
-                            ${config.name}
-                            <span class="api-config-source-tag">${sourceLabel}</span>
-                        </div>
-                        <div class="api-config-endpoint">${endpointSummary}</div>
-                        <div class="api-config-meta">
-                            <span class="api-config-pill">${secretSummary}</span>
-                            ${config.group ? `<span class="api-config-pill">分组: ${config.group}</span>` : ''}
-                        </div>
-                        ${config.model ? `<div class="api-config-model">首选模型: ${config.model}</div>` : '<div class="api-config-no-model">未设置模型</div>'}
-                    </div>
-                    <div class="api-config-actions">
-                        <button class="menu_button api-config-apply" data-index="${index}"><i class="fa-solid fa-bolt"></i> 应用</button>
-                        <button class="menu_button api-config-edit" data-index="${index}"><i class="fa-solid fa-pen"></i> 编辑</button>
-                        <button class="menu_button api-config-delete" data-index="${index}"><i class="fa-solid fa-trash"></i> 删除</button>
+        const configItem = $(`
+            <div class="api-config-provider-item ${isActive}">
+                <div class="api-config-provider-main api-config-edit" data-index="${index}">
+                    <div class="api-config-provider-avatar">${avatarText}</div>
+                    <div class="api-config-provider-text">
+                        <div class="api-config-provider-name">${displayName}</div>
+                        <div class="api-config-provider-sub">${displaySub}</div>
+                        ${groupLabel}
                     </div>
                 </div>
-            `);
-            groupContent.append(configItem);
-        });
-
-        container.append(groupHeader);
-        container.append(groupContent);
-
-        // 应用保存的折叠状态
-        const isCollapsed = extension_settings[MODULE_NAME].collapsedGroups[groupName];
-        if (isCollapsed) {
-            groupContent.hide();
-            groupHeader.find('i').removeClass('fa-chevron-down').addClass('fa-chevron-right');
-        }
+                <div class="api-config-provider-right">
+                    <span class="api-config-provider-state">ON</span>
+                    <button class="menu_button api-config-apply" data-index="${index}" title="应用配置">
+                        <i class="fa-solid fa-bolt"></i>
+                    </button>
+                    <button class="menu_button api-config-delete" data-index="${index}" title="删除配置">
+                        <i class="fa-solid fa-minus"></i>
+                    </button>
+                </div>
+            </div>
+        `);
+        container.append(configItem);
     });
+}
+
+function updateEditorHeader() {
+    const name = String($('#api-config-name').val() || '').trim();
+    const displayName = name || (editingIndex >= 0 ? '编辑配置' : '新建配置');
+    const modeText = editingIndex >= 0 ? '编辑模式' : '创建模式';
+
+    $('#api-config-editor-name').text(displayName);
+    $('#api-config-editor-mode').text(modeText);
 }
 
 // 编辑配置
@@ -915,11 +939,13 @@ function editConfig(index) {
     // 聚焦到名称字段
     $('#api-config-name').focus();
 
+    updateEditorHeader();
+    renderConfigList();
     toastr.info(`正在编辑配置: ${config.name}`, 'API配置管理器');
 }
 
 // 取消编辑配置
-function cancelEditConfig() {
+function cancelEditConfig(showToast = true) {
     // 重置编辑状态
     editingIndex = -1;
     $('#api-config-save').text('保存配置');
@@ -936,73 +962,91 @@ function cancelEditConfig() {
     $('#api-config-model-select').hide(); // 隐藏模型选择下拉框
     updateFormBySource($('#api-config-source').val());
 
-    toastr.info('已取消编辑，切换到新建配置模式', 'API配置管理器');
+    updateEditorHeader();
+    renderConfigList();
+    if (showToast) {
+        toastr.info('已取消编辑，切换到新建配置模式', 'API配置管理器');
+    }
 }
 
 function buildPopupSettingsHtml() {
     return `
         <div class="api_config_settings api-config-popup">
-            <div class="api-config-hero">
-                <div class="api-config-header">
-                    <div class="api-config-title">
-                        <i class="fa-solid fa-server"></i>
-                        <div>
-                            <b>API配置管理器</b>
-                            <div class="api-config-subtitle">统一管理多个服务商配置，快速切换连接</div>
-                        </div>
-                        <span class="api-config-version">v${EXTENSION_INFO.version}</span>
+            <div class="api-config-shell">
+                <aside class="api-config-sidebar">
+                    <div class="api-config-search-wrap">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input id="api-config-search" type="text" class="text_pole" placeholder="搜索模型平台...">
                     </div>
-                    <div class="api-config-header-actions">
-                        <button id="api-config-update" class="menu_button api-config-update-btn" title="检查并更新扩展">
-                            <i class="fa-solid fa-download"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="api-config-hero-stats">
-                    <div class="api-config-stat-card">
-                        <span id="api-config-summary-count">0</span>
-                        <small>已保存配置</small>
-                    </div>
-                    <div id="api-config-source-chip" class="api-config-source-chip is-custom">当前来源：Custom</div>
-                </div>
-            </div>
+                    <div id="api-config-list" class="api-config-provider-list"></div>
+                    <button id="api-config-new-entry" class="menu_button api-config-new-entry">
+                        <i class="fa-solid fa-plus"></i> 添加
+                    </button>
+                </aside>
 
-            <div class="api-config-layout">
-                <div class="api-config-section api-config-section-form">
-                    <h4>新增或编辑配置</h4>
-                    <div class="flex-container flexFlowColumn flexGap5">
-                        <input type="text" id="api-config-name" placeholder="配置名称 (例如: OpenAI GPT-4)" class="text_pole">
-                        <input type="text" id="api-config-group" placeholder="分组名称 (可选，例如: 工作用)" class="text_pole">
+                <section class="api-config-main">
+                    <div class="api-config-main-header">
+                        <div class="api-config-main-title">
+                            <span id="api-config-editor-name">新建配置</span>
+                            <span id="api-config-editor-mode">创建模式</span>
+                        </div>
+                        <div class="api-config-main-tools">
+                            <span id="api-config-source-chip" class="api-config-source-chip is-custom">当前来源：Custom</span>
+                            <button id="api-config-update" class="menu_button api-config-update-btn" title="检查并更新扩展">
+                                <i class="fa-solid fa-download"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="api-config-main-meta">
+                        <span class="api-config-version">v${EXTENSION_INFO.version}</span>
+                        <span id="api-config-summary-count">0</span>
+                        <small>个配置</small>
+                    </div>
+
+                    <div class="api-config-form">
+                        <label class="api-config-label" for="api-config-key">API密钥</label>
+                        <div class="api-config-inline-field">
+                            <input type="password" id="api-config-key" placeholder="输入密钥（可选）" class="text_pole">
+                            <button id="api-config-fetch-models" class="menu_button">获取模型</button>
+                        </div>
+
+                        <label class="api-config-label" for="api-config-source">接入类型</label>
                         <select id="api-config-source" class="text_pole">
                             <option value="${CHAT_COMPLETION_SOURCES.CUSTOM}">Custom (OpenAI兼容)</option>
                             <option value="${CHAT_COMPLETION_SOURCES.MAKERSUITE}">Google AI Studio</option>
                         </select>
+
+                        <label class="api-config-label" for="api-config-url">API地址</label>
                         <input type="text" id="api-config-url" placeholder="Custom API URL (例如: https://api.openai.com/v1)" class="text_pole">
-                        <input type="password" id="api-config-key" placeholder="API密钥 (可选)" class="text_pole">
                         <input type="text" id="api-config-reverse-proxy" placeholder="反代服务器URL (可选)" class="text_pole" style="display: none;">
                         <input type="password" id="api-config-proxy-password" placeholder="反代密码/Token (可选)" class="text_pole" style="display: none;">
-                        <div class="flex-container flexGap5 model-input-container">
-                            <input type="text" id="api-config-model" placeholder="首选模型 (可选，例如: gpt-4)" class="text_pole api-config-model-input">
-                            <button id="api-config-fetch-models" class="menu_button">获取模型</button>
+
+                        <div class="api-config-inline-double">
+                            <div>
+                                <label class="api-config-label" for="api-config-name">配置名称</label>
+                                <input type="text" id="api-config-name" placeholder="例如: youzini-反重力" class="text_pole">
+                            </div>
+                            <div>
+                                <label class="api-config-label" for="api-config-group">分组</label>
+                                <input type="text" id="api-config-group" placeholder="可选分组" class="text_pole">
+                            </div>
                         </div>
+
+                        <label class="api-config-label" for="api-config-model">模型</label>
+                        <input type="text" id="api-config-model" placeholder="首选模型（可选）" class="text_pole">
                         <select id="api-config-model-select" class="text_pole" style="display: none;">
                             <option value="">选择模型...</option>
                         </select>
+
+                        <small id="api-config-source-hint">Custom：使用OpenAI兼容接口（可用于反代OpenAI兼容服务）。</small>
+
                         <div class="flex-container flexGap5 button-container">
                             <button id="api-config-save" class="menu_button"><i class="fa-solid fa-floppy-disk"></i> 保存配置</button>
                             <button id="api-config-cancel" class="menu_button" style="display: none;"><i class="fa-solid fa-ban"></i> 取消</button>
                         </div>
                     </div>
-                    <small id="api-config-source-hint">Custom：使用OpenAI兼容接口（可用于反代OpenAI兼容服务）。</small>
-                </div>
-
-                <div class="api-config-section api-config-section-list">
-                    <div class="api-config-list-header">
-                        <h4>配置库</h4>
-                        <small>按分组管理，点击“应用”即可切换</small>
-                    </div>
-                    <div id="api-config-list"></div>
-                </div>
+                </section>
             </div>
         </div>
     `;
@@ -1035,6 +1079,7 @@ function ensureOptionsMenuEntry() {
 }
 
 async function openConfigPopup() {
+    editingIndex = -1;
     const popupContent = $(buildPopupSettingsHtml());
     const popupPromise = callPopup(popupContent, 'text', '', {
         okButton: '关闭',
@@ -1044,6 +1089,7 @@ async function openConfigPopup() {
     });
 
     updateFormBySource($('#api-config-source').val());
+    updateEditorHeader();
     renderConfigList();
 
     await popupPromise;
@@ -1069,6 +1115,15 @@ function bindEvents() {
     // 保存新配置
     $(document).on('click', '#api-config-save', saveNewConfig);
 
+    // 配置搜索
+    $(document).on('input', '#api-config-search', renderConfigList);
+
+    // 左侧新增按钮
+    $(document).on('click', '#api-config-new-entry', function () {
+        cancelEditConfig(false);
+        $('#api-config-name').focus();
+    });
+
     // 取消编辑配置
     $(document).on('click', '#api-config-cancel', cancelEditConfig);
 
@@ -1078,24 +1133,6 @@ function bindEvents() {
     // 切换来源（更新表单展示）
     $(document).on('change', '#api-config-source', function () {
         updateFormBySource($(this).val());
-    });
-
-    // 分组折叠/展开
-    $(document).on('click', '.api-config-group-header', function() {
-        const header = $(this);
-        const groupName = header.data('group');
-        const content = header.next('.api-config-group-content');
-        const icon = header.find('i');
-
-        // 在动画前检测当前状态
-        const willBeCollapsed = content.is(':visible');
-
-        content.slideToggle(200);
-        icon.toggleClass('fa-chevron-down fa-chevron-right');
-
-        // 保存折叠状态
-        extension_settings[MODULE_NAME].collapsedGroups[groupName] = willBeCollapsed;
-        saveSettingsDebounced();
     });
 
     // 更新扩展
@@ -1154,6 +1191,9 @@ function bindEvents() {
             saveNewConfig();
         }
     });
+
+    // 输入名称时更新右侧标题
+    $(document).on('input', '#api-config-name', updateEditorHeader);
 }
 
 // 扩展初始化函数
