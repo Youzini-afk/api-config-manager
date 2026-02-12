@@ -2033,6 +2033,9 @@ function buildInlineApiEntryHtml() {
             <button id="${INLINE_API_ENTRY_OPEN_BTN_ID}" class="menu_button api-config-inline-launcher-btn">
                 打开配置面板
             </button>
+            <div class="api-config-inline-launcher-tip">
+                也可通过点击左下角选择API配置管理器进行配置
+            </div>
             <div class="inline-drawer api-config-legacy-drawer">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>经典配置方式</b>

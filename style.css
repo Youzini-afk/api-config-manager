@@ -55,6 +55,13 @@
     white-space: nowrap;
 }
 
+.api-config-inline-launcher-tip {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #8fa0ba;
+    line-height: 1.4;
+}
+
 .api-config-legacy-drawer {
     margin-top: 10px;
     border: 1px solid #2b3444;
@@ -1023,6 +1030,10 @@
     .api-config-inline-launcher-btn {
         height: 32px;
         font-size: 12px;
+    }
+
+    .api-config-inline-launcher-tip {
+        font-size: 10px;
     }
 
     .api-config-legacy-drawer .inline-drawer-header {
