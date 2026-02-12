@@ -182,9 +182,16 @@
 
 .api-config-provider-right {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-end;
     gap: 6px;
     flex-shrink: 0;
+}
+
+.api-config-provider-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .api-config-provider-state {
@@ -213,9 +220,31 @@
     color: #b4bfd2;
 }
 
+.api-config-provider-right .api-config-apply-primary {
+    width: auto;
+    min-width: 88px;
+    padding: 0 10px;
+    gap: 4px;
+    border-color: #256845;
+    background: linear-gradient(145deg, #1f7b47, #155031);
+    color: #eafff1;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.api-config-provider-right .api-config-apply-primary i {
+    font-size: 11px;
+}
+
 .api-config-provider-right .menu_button:hover {
     border-color: #3e485a;
     color: #f7fbff;
+}
+
+.api-config-provider-right .api-config-apply-primary:hover {
+    border-color: #2e8c5a;
+    background: linear-gradient(145deg, #259055, #19643d);
+    color: #f3fff8;
 }
 
 .api-config-provider-right .api-config-delete {

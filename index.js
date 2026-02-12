@@ -1101,12 +1101,14 @@ function renderConfigList() {
                 </div>
                 <div class="api-config-provider-right">
                     <span class="api-config-provider-state">ON</span>
-                    <button class="menu_button api-config-apply" data-index="${index}" title="应用配置">
-                        <i class="fa-solid fa-bolt"></i>
-                    </button>
-                    <button class="menu_button api-config-delete" data-index="${index}" title="删除配置">
-                        <i class="fa-solid fa-minus"></i>
-                    </button>
+                    <div class="api-config-provider-actions">
+                        <button class="menu_button api-config-apply api-config-apply-primary" data-index="${index}" title="应用配置">
+                            <i class="fa-solid fa-bolt"></i> 应用配置
+                        </button>
+                        <button class="menu_button api-config-delete" data-index="${index}" title="删除配置">
+                            <i class="fa-solid fa-minus"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         `);
@@ -1348,7 +1350,7 @@ function buildPopupSettingsHtml() {
                         <div class="api-config-inline-double">
                             <div>
                                 <label class="api-config-label" for="api-config-name">配置名称</label>
-                                <input type="text" id="api-config-name" placeholder="例如: youzini-反重力" class="text_pole">
+                                <input type="text" id="api-config-name" placeholder="例如: 自定义平台-主配置" class="text_pole">
                             </div>
                             <div>
                                 <label class="api-config-label" for="api-config-group">分组</label>
