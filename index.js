@@ -1,5 +1,5 @@
-import { extension_settings, renderExtensionTemplateAsync } from '../../../../../scripts/extensions.js';
-import { eventSource, event_types, saveSettingsDebounced, getRequestHeaders } from '../../../../../script.js';
+import { extension_settings } from '../../../../../scripts/extensions.js';
+import { saveSettingsDebounced, getRequestHeaders, callPopup } from '../../../../../script.js';
 import { SECRET_KEYS, writeSecret, findSecret, readSecretState, secret_state } from '../../../../../scripts/secrets.js';
 
 // Import rotateSecret if available (added in newer SillyTavern versions)
@@ -39,6 +39,9 @@ const SOURCE_SECRET_KEYS = {
     [CHAT_COMPLETION_SOURCES.CUSTOM]: SECRET_KEYS.CUSTOM,
     [CHAT_COMPLETION_SOURCES.MAKERSUITE]: SECRET_KEYS.MAKERSUITE,
 };
+
+const OPTIONS_MENU_SELECTOR = '#options .options-content';
+const OPTIONS_MENU_ITEM_ID = 'option_api_config_manager';
 
 // 扩展信息
 const EXTENSION_INFO = {
@@ -843,94 +846,113 @@ function cancelEditConfig() {
     toastr.info('已取消编辑，切换到新建配置模式', 'API配置管理器');
 }
 
-// 创建UI
-async function createUI() {
-    try {
-        // 直接使用内联HTML而不是模板文件
-        const settingsHtml = `
-            <div class="api_config_settings">
-                <div class="inline-drawer">
-                    <div class="inline-drawer-toggle inline-drawer-header">
-                        <div class="api-config-header">
-                            <div class="api-config-title">
-                                <b>API配置管理器</b>
-                                <span class="api-config-version">v${EXTENSION_INFO.version}</span>
-                            </div>
-                            <div class="api-config-actions">
-                                <button id="api-config-update" class="menu_button api-config-update-btn" title="检查并更新扩展">
-                                    <i class="fa-solid fa-download"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                    </div>
-                    <div class="inline-drawer-content">
-                        <div class="api-config-section">
-                            <h4>添加新配置</h4>
-                            <div class="flex-container flexFlowColumn flexGap5">
-                                <input type="text" id="api-config-name" placeholder="配置名称 (例如: OpenAI GPT-4)" class="text_pole">
-                                <input type="text" id="api-config-group" placeholder="分组名称 (可选，例如: 工作用)" class="text_pole">
-                                <select id="api-config-source" class="text_pole">
-                                    <option value="${CHAT_COMPLETION_SOURCES.CUSTOM}">Custom (OpenAI兼容)</option>
-                                    <option value="${CHAT_COMPLETION_SOURCES.MAKERSUITE}">Google AI Studio</option>
-                                </select>
-                                <input type="text" id="api-config-url" placeholder="Custom API URL (例如: https://api.openai.com/v1)" class="text_pole">
-                                <input type="password" id="api-config-key" placeholder="API密钥 (可选)" class="text_pole">
-                                <input type="text" id="api-config-reverse-proxy" placeholder="反代服务器URL (可选)" class="text_pole" style="display: none;">
-                                <input type="password" id="api-config-proxy-password" placeholder="反代密码/Token (可选)" class="text_pole" style="display: none;">
-                                <div class="flex-container flexGap5 model-input-container">
-                                    <input type="text" id="api-config-model" placeholder="首选模型 (可选，例如: gpt-4)" class="text_pole" style="flex: 1;">
-                                    <button id="api-config-fetch-models" class="menu_button" style="white-space: nowrap;">获取模型</button>
-                                </div>
-                                <select id="api-config-model-select" class="text_pole" style="display: none;">
-                                    <option value="">选择模型...</option>
-                                </select>
-                                <div class="flex-container flexGap5 button-container">
-                                    <button id="api-config-save" class="menu_button">保存配置</button>
-                                    <button id="api-config-cancel" class="menu_button" style="display: none;">❌ 取消</button>
-                                </div>
-                            </div>
-                            <small id="api-config-source-hint">Custom：使用OpenAI兼容接口（可用于反代OpenAI兼容服务）。</small>
-                        </div>
-                        <div class="api-config-section">
-                            <h4>已保存的配置</h4>
-                            <div id="api-config-list"></div>
-                        </div>
-                    </div>
+function buildPopupSettingsHtml() {
+    return `
+        <div class="api_config_settings api-config-popup">
+            <div class="api-config-header">
+                <div class="api-config-title">
+                    <b>API配置管理器</b>
+                    <span class="api-config-version">v${EXTENSION_INFO.version}</span>
+                </div>
+                <div class="api-config-actions">
+                    <button id="api-config-update" class="menu_button api-config-update-btn" title="检查并更新扩展">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
                 </div>
             </div>
-        `;
+            <div class="api-config-section">
+                <h4>添加新配置</h4>
+                <div class="flex-container flexFlowColumn flexGap5">
+                    <input type="text" id="api-config-name" placeholder="配置名称 (例如: OpenAI GPT-4)" class="text_pole">
+                    <input type="text" id="api-config-group" placeholder="分组名称 (可选，例如: 工作用)" class="text_pole">
+                    <select id="api-config-source" class="text_pole">
+                        <option value="${CHAT_COMPLETION_SOURCES.CUSTOM}">Custom (OpenAI兼容)</option>
+                        <option value="${CHAT_COMPLETION_SOURCES.MAKERSUITE}">Google AI Studio</option>
+                    </select>
+                    <input type="text" id="api-config-url" placeholder="Custom API URL (例如: https://api.openai.com/v1)" class="text_pole">
+                    <input type="password" id="api-config-key" placeholder="API密钥 (可选)" class="text_pole">
+                    <input type="text" id="api-config-reverse-proxy" placeholder="反代服务器URL (可选)" class="text_pole" style="display: none;">
+                    <input type="password" id="api-config-proxy-password" placeholder="反代密码/Token (可选)" class="text_pole" style="display: none;">
+                    <div class="flex-container flexGap5 model-input-container">
+                        <input type="text" id="api-config-model" placeholder="首选模型 (可选，例如: gpt-4)" class="text_pole" style="flex: 1;">
+                        <button id="api-config-fetch-models" class="menu_button" style="white-space: nowrap;">获取模型</button>
+                    </div>
+                    <select id="api-config-model-select" class="text_pole" style="display: none;">
+                        <option value="">选择模型...</option>
+                    </select>
+                    <div class="flex-container flexGap5 button-container">
+                        <button id="api-config-save" class="menu_button">保存配置</button>
+                        <button id="api-config-cancel" class="menu_button" style="display: none;">❌ 取消</button>
+                    </div>
+                </div>
+                <small id="api-config-source-hint">Custom：使用OpenAI兼容接口（可用于反代OpenAI兼容服务）。</small>
+            </div>
+            <div class="api-config-section">
+                <h4>已保存的配置</h4>
+                <div id="api-config-list"></div>
+            </div>
+        </div>
+    `;
+}
 
-        // 首先尝试添加到API连接界面（自定义API部分）
-        const customApiForm = $('#custom_form');
-        if (customApiForm.length > 0) {
-            // 在自定义API表单后添加配置管理器
-            customApiForm.after(settingsHtml);
-            return;
-        }
-
-        // 如果API连接界面不可用，回退到扩展设置
-        const container = $('#extensions_settings');
-        if (container.length > 0) {
-            container.append(settingsHtml);
-        } else {
-            // 尝试其他可能的容器
-            const altContainer = $('#extensions_settings2');
-            if (altContainer.length > 0) {
-                altContainer.append(settingsHtml);
-            } else {
-                console.error('找不到扩展设置容器，API配置管理器UI可能无法正常显示');
-            }
-        }
-    } catch (error) {
-        console.error('创建UI时出错:', error);
+function ensureOptionsMenuEntry() {
+    const optionsMenu = $(OPTIONS_MENU_SELECTOR);
+    if (!optionsMenu.length) {
+        console.error('找不到左下菜单容器，无法注册API配置管理器入口');
+        return;
     }
+
+    if ($(`#${OPTIONS_MENU_ITEM_ID}`).length) {
+        return;
+    }
+
+    const menuItemHtml = `
+        <a id="${OPTIONS_MENU_ITEM_ID}">
+            <i class="fa-lg fa-solid fa-server"></i>
+            <span>API配置管理器</span>
+        </a>
+    `;
+
+    const insertAfter = optionsMenu.find('#option_select_chat').last();
+    if (insertAfter.length) {
+        insertAfter.after(menuItemHtml);
+    } else {
+        optionsMenu.append(menuItemHtml);
+    }
+}
+
+async function openConfigPopup() {
+    const popupContent = $(buildPopupSettingsHtml());
+    const popupPromise = callPopup(popupContent, 'text', '', {
+        okButton: '关闭',
+        wide: true,
+        large: true,
+        allowVerticalScrolling: true,
+    });
+
+    updateFormBySource($('#api-config-source').val());
+    renderConfigList();
+
+    await popupPromise;
+}
+
+// 创建UI
+async function createUI() {
+    ensureOptionsMenuEntry();
 }
 
 
 
 // 绑定事件
 function bindEvents() {
+    // 左下三条杠菜单入口
+    $(document).on('click', `#${OPTIONS_MENU_ITEM_ID}`, async function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $('#options_button').trigger('click');
+        await openConfigPopup();
+    });
+
     // 保存新配置
     $(document).on('click', '#api-config-save', saveNewConfig);
 
@@ -1026,8 +1048,6 @@ async function initExtension() {
     initSettings();
     await createUI();
     bindEvents();
-    updateFormBySource($('#api-config-source').val());
-    renderConfigList(); // 初始化时渲染配置列表
 
     // 延迟检查更新（避免影响扩展加载速度）
     setTimeout(() => {

@@ -109,6 +109,16 @@
     background: var(--SmartThemeBlurTintColor);
 }
 
+.api-config-popup {
+    margin: 0;
+}
+
+.api-config-popup .api-config-header {
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
 /* 当在API连接界面时的特殊样式 */
 #openai_api .api_config_settings,
 #custom_form + .api_config_settings {
