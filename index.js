@@ -1357,6 +1357,8 @@ function renderConfigList() {
         const isEnabled = activeConfigIndex === index;
         const stateClass = isEnabled ? 'is-on' : 'is-off';
         const stateText = isEnabled ? 'ON' : 'OFF';
+        const applyLabel = isEnabled ? '已应用' : '应用配置';
+        const applyClass = isEnabled ? 'is-current' : '';
 
         const shouldShowGroupHeader = sortMode === LIST_SORT_MODES.GROUP && groupedHeaderNames.has(configGroup);
         if (shouldShowGroupHeader && configGroup !== lastGroup) {
@@ -1371,16 +1373,23 @@ function renderConfigList() {
 
         const configItem = $(`
             <div class="api-config-provider-item ${isActive}">
-                <div class="api-config-provider-main api-config-edit" data-index="${index}">
-                    <div class="api-config-provider-avatar">${avatarText}</div>
-                    <div class="api-config-provider-text">
-                        <div class="api-config-provider-name">${displayName}</div>
-                        <div class="api-config-provider-sub">${displaySub}</div>
-                        ${groupLabel}
+                <div class="api-config-provider-head">
+                    <div class="api-config-provider-main api-config-edit" data-index="${index}">
+                        <div class="api-config-provider-avatar">${avatarText}</div>
+                        <div class="api-config-provider-text">
+                            <div class="api-config-provider-name">${displayName}</div>
+                            <div class="api-config-provider-sub">${displaySub}</div>
+                            ${groupLabel}
+                        </div>
+                    </div>
+                    <div class="api-config-provider-right">
+                        <span class="api-config-provider-state ${stateClass}">${stateText}</span>
                     </div>
                 </div>
-                <div class="api-config-provider-right">
-                    <span class="api-config-provider-state ${stateClass}">${stateText}</span>
+                <div class="api-config-provider-mobile-actions">
+                    <button class="menu_button api-config-provider-apply ${applyClass}" data-index="${index}" ${isEnabled ? 'disabled' : ''}>
+                        <i class="fa-solid fa-bolt"></i> ${applyLabel}
+                    </button>
                 </div>
             </div>
         `);
@@ -1929,6 +1938,19 @@ function bindEvents() {
     $(document).on('click', '.api-config-edit', function() {
         const index = parseInt($(this).data('index'));
         editConfig(index);
+    });
+
+    // 列表项直接应用配置（移动端为主）
+    $(document).on('click', '.api-config-provider-apply', async function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const index = Number($(this).data('index'));
+        if (!Number.isInteger(index) || index < 0) return;
+
+        const config = extension_settings[MODULE_NAME].configs[index];
+        if (!config) return;
+        await applyConfig(config);
     });
 
     // 编辑区应用当前配置

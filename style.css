@@ -174,8 +174,8 @@
 
 .api-config-provider-item {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: stretch;
     gap: 8px;
     border: 1px solid transparent;
     border-radius: 12px;
@@ -193,6 +193,14 @@
 .api-config-provider-item.is-active {
     border-color: #3b4558;
     background: rgba(255, 255, 255, 0.06);
+}
+
+.api-config-provider-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
 }
 
 .api-config-provider-main {
@@ -275,6 +283,34 @@
     border-color: #1f4b2a;
     color: #68ea8a;
     background: rgba(59, 194, 95, 0.14);
+}
+
+.api-config-provider-mobile-actions {
+    display: none;
+}
+
+.api-config-provider-apply {
+    width: 100%;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid #256845;
+    background: linear-gradient(145deg, #1f7b47, #155031);
+    color: #eafff1;
+    padding: 0 10px !important;
+    font-size: 13px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.api-config-provider-apply.is-current,
+.api-config-provider-apply:disabled {
+    border-color: #2a3340;
+    background: #131923;
+    color: #8e9db6;
+    cursor: default;
 }
 
 .api-config-new-entry {
@@ -709,27 +745,43 @@
     }
 
     .api-config-provider-item {
-        padding: 7px 8px;
-        border-radius: 10px;
+        padding: 11px 10px;
+        border-radius: 12px;
+        gap: 10px;
+        margin-bottom: 8px;
     }
 
     .api-config-provider-avatar {
-        width: 26px;
-        height: 26px;
-        font-size: 12px;
+        width: 34px;
+        height: 34px;
+        font-size: 14px;
     }
 
     .api-config-provider-name {
-        font-size: 13px;
+        font-size: 15px;
     }
 
     .api-config-provider-sub {
-        font-size: 10px;
+        font-size: 11px;
     }
 
     .api-config-provider-state {
-        min-width: 34px;
-        font-size: 10px;
+        min-width: 42px;
+        font-size: 11px;
+        padding: 3px 9px;
+    }
+
+    .api-config-provider-main {
+        gap: 12px;
+    }
+
+    .api-config-provider-mobile-actions {
+        display: flex;
+    }
+
+    .api-config-provider-apply {
+        height: 36px;
+        font-size: 14px;
     }
 
     .api-config-main-header {
