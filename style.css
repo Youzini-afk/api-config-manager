@@ -250,6 +250,15 @@
     text-overflow: ellipsis;
 }
 
+.api-config-provider-model {
+    margin-top: 2px;
+    font-size: 11px;
+    color: #b5c4df;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .api-config-provider-group {
     margin-top: 4px;
     display: inline-block;
@@ -762,6 +771,10 @@
     }
 
     .api-config-provider-sub {
+        font-size: 11px;
+    }
+
+    .api-config-provider-model {
         font-size: 11px;
     }
 

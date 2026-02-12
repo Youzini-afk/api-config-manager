@@ -1342,13 +1342,14 @@ function renderConfigList() {
 
     let lastGroup = '';
     ordered.forEach(({ config, index, groupName }) => {
-        const sourceLabel = getSourceLabel(config.source);
         const configGroup = groupName || '未分组';
         const endpointSummary = normalizeSource(config.source) === CHAT_COMPLETION_SOURCES.CUSTOM
             ? (config.customUrl || config.url || '未填写Custom URL')
             : (config.reverseProxy || '默认连接');
+        const modelSummary = config.model || '未设置模型';
         const displayName = escapeHtml(config.name || `配置 ${index + 1}`);
-        const displaySub = escapeHtml(`${sourceLabel} · ${endpointSummary}`);
+        const displayEndpoint = escapeHtml(`URL: ${endpointSummary}`);
+        const displayModel = escapeHtml(`模型: ${modelSummary}`);
         const groupLabel = sortMode !== LIST_SORT_MODES.GROUP
             ? `<span class="api-config-provider-group">${escapeHtml(configGroup)}</span>`
             : '';
@@ -1378,7 +1379,8 @@ function renderConfigList() {
                         <div class="api-config-provider-avatar">${avatarText}</div>
                         <div class="api-config-provider-text">
                             <div class="api-config-provider-name">${displayName}</div>
-                            <div class="api-config-provider-sub">${displaySub}</div>
+                            <div class="api-config-provider-sub">${displayEndpoint}</div>
+                            <div class="api-config-provider-model">${displayModel}</div>
                             ${groupLabel}
                         </div>
                     </div>
