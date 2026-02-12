@@ -446,6 +446,82 @@ async function fetchAvailableModels() {
     }
 }
 
+function getEndpointFieldLabel(source) {
+    return normalizeSource(source) === CHAT_COMPLETION_SOURCES.CUSTOM ? 'URL' : '反代地址';
+}
+
+function getConfigEndpointValue(config, source = normalizeSource(config?.source)) {
+    const normalized = normalizeSource(source);
+    if (!config || typeof config !== 'object') return '';
+
+    if (normalized === CHAT_COMPLETION_SOURCES.CUSTOM) {
+        const raw = (typeof config.customUrl === 'string' ? config.customUrl : config.url) || '';
+        return String(raw).trim();
+    }
+
+    if (normalized === CHAT_COMPLETION_SOURCES.MAKERSUITE) {
+        return String(config.reverseProxy || '').trim();
+    }
+
+    return '';
+}
+
+function setConfigEndpointValue(config, source, endpoint) {
+    if (!config || typeof config !== 'object') return;
+    const normalized = normalizeSource(source);
+    const value = String(endpoint || '').trim();
+
+    if (normalized === CHAT_COMPLETION_SOURCES.CUSTOM) {
+        config.customUrl = value;
+        config.url = value;
+    } else if (normalized === CHAT_COMPLETION_SOURCES.MAKERSUITE) {
+        config.reverseProxy = value;
+    }
+}
+
+function maybeSyncConfigsWithSameEndpoint(referenceIndex, previousConfig, newConfig) {
+    const prevSource = normalizeSource(previousConfig?.source);
+    const newSource = normalizeSource(newConfig?.source);
+    if (prevSource !== newSource) return 0;
+
+    const oldEndpoint = getConfigEndpointValue(previousConfig, prevSource);
+    const nextEndpoint = getConfigEndpointValue(newConfig, newSource);
+    if (oldEndpoint === nextEndpoint) return 0;
+
+    const linkedIndexes = extension_settings[MODULE_NAME].configs
+        .map((cfg, idx) => ({ cfg, idx }))
+        .filter(({ cfg, idx }) =>
+            idx !== referenceIndex &&
+            normalizeSource(cfg?.source) === prevSource &&
+            getConfigEndpointValue(cfg, prevSource) === oldEndpoint)
+        .map(({ idx }) => idx);
+
+    if (linkedIndexes.length === 0) return 0;
+
+    const fieldLabel = getEndpointFieldLabel(prevSource);
+    const oldLabel = oldEndpoint || '（空地址）';
+    const nextLabel = nextEndpoint || '（空地址）';
+    const shouldSync = confirm(
+        `检测到还有 ${linkedIndexes.length} 个配置使用同一${fieldLabel}：\n` +
+        `${oldLabel}\n\n是否将这些配置也更新为：\n${nextLabel}？`
+    );
+
+    if (!shouldSync) return 0;
+
+    for (const idx of linkedIndexes) {
+        const linkedConfig = extension_settings[MODULE_NAME].configs[idx];
+        setConfigEndpointValue(linkedConfig, prevSource, nextEndpoint);
+    }
+
+    return linkedIndexes.length;
+}
+
+function showEndpointSyncToastIfNeeded(syncCount, source) {
+    if (syncCount <= 0) return;
+    const fieldLabel = getEndpointFieldLabel(source);
+    toastr.success(`已同步更新 ${syncCount} 个同${fieldLabel}配置`, 'API配置管理器');
+}
+
 // 保存新配置（从用户输入）
 function saveNewConfig() {
     const name = $('#api-config-name').val().trim();
@@ -503,7 +579,9 @@ function saveNewConfig() {
         }
 
         extension_settings[MODULE_NAME].configs[editingIndex] = config;
+        const syncCount = maybeSyncConfigsWithSameEndpoint(editingIndex, previousConfig, config);
         toastr.success(`已更新配置: ${name}`, 'API配置管理器');
+        showEndpointSyncToastIfNeeded(syncCount, source);
         editingIndex = -1; // 重置编辑状态
         $('#api-config-save').text('保存配置'); // 重置按钮文本
         $('#api-config-cancel').hide(); // 隐藏取消按钮
@@ -526,7 +604,9 @@ function saveNewConfig() {
             }
 
             extension_settings[MODULE_NAME].configs[existingIndex] = config;
+            const syncCount = maybeSyncConfigsWithSameEndpoint(existingIndex, previousConfig, config);
             toastr.success(`已更新配置: ${name}`, 'API配置管理器');
+            showEndpointSyncToastIfNeeded(syncCount, source);
         } else {
             // 添加新配置
             extension_settings[MODULE_NAME].configs.push(config);
