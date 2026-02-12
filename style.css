@@ -17,6 +17,8 @@
     padding: 0;
     margin: 0;
     overflow: hidden;
+    width: 100%;
+    max-width: 100%;
 }
 
 .api-config-inline-launcher {
@@ -564,12 +566,14 @@
 @media (max-width: 1080px) {
     .api-config-popup {
         border-radius: 14px;
+        max-height: calc(100vh - 16px);
+        overflow: auto;
     }
 
     .api-config-shell {
         grid-template-columns: 1fr;
-        min-height: auto;
-        max-height: min(86vh, 820px);
+        min-height: 0;
+        max-height: none;
     }
 
     .api-config-sidebar {
@@ -585,7 +589,7 @@
 
     .api-config-main {
         padding: 12px;
-        overflow: auto;
+        overflow: visible;
         -webkit-overflow-scrolling: touch;
     }
 
@@ -598,10 +602,12 @@
 @media (max-width: 720px) {
     .api-config-popup {
         border-radius: 12px;
+        max-height: calc(100vh - 8px);
+        overflow: auto;
     }
 
     .api-config-shell {
-        max-height: min(88vh, 760px);
+        max-height: none;
     }
 
     .api-config-sidebar {
@@ -621,7 +627,7 @@
     }
 
     .api-config-provider-list {
-        max-height: min(34vh, 280px);
+        max-height: min(40vh, 320px);
         padding-right: 0;
     }
 
@@ -760,5 +766,23 @@
         height: 36px;
         width: 100%;
         min-width: 0;
+    }
+
+    .api-config-popup-host,
+    .popup:has(.api-config-popup),
+    .dialogue_popup:has(.api-config-popup),
+    .modal:has(.api-config-popup),
+    .popup-window:has(.api-config-popup) {
+        width: calc(100vw - 8px) !important;
+        max-width: calc(100vw - 8px) !important;
+    }
+
+    .api-config-popup-host .popup-content,
+    .api-config-popup-host .dialogue_popup_content,
+    .api-config-popup-host .popup_inner,
+    .api-config-popup-host .popup-body {
+        max-height: calc(100vh - 12px) !important;
+        overflow: auto !important;
+        -webkit-overflow-scrolling: touch;
     }
 }
