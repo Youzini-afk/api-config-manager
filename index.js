@@ -40,6 +40,35 @@ const SOURCE_SECRET_KEYS = {
     [CHAT_COMPLETION_SOURCES.MAKERSUITE]: SECRET_KEYS.MAKERSUITE,
 };
 
+const AUTO_GROUP_HOST_SKIP = new Set([
+    'api',
+    'www',
+    'gateway',
+    'proxy',
+    'service',
+    'chat',
+    'llm',
+    'openai',
+]);
+
+const AUTO_GROUP_TLD_SKIP = new Set([
+    'com',
+    'cn',
+    'net',
+    'org',
+    'io',
+    'ai',
+    'co',
+    'dev',
+    'app',
+    'top',
+    'vip',
+    'pro',
+    'site',
+    'cloud',
+    'art',
+]);
+
 const OPTIONS_MENU_SELECTOR = '#options .options-content';
 const OPTIONS_MENU_ITEM_ID = 'option_api_config_manager';
 
@@ -117,6 +146,79 @@ function getSourceLabel(source) {
         return `Unsupported (${source})`;
     }
     return SOURCE_LABELS[normalized] || SOURCE_LABELS[CHAT_COMPLETION_SOURCES.CUSTOM];
+}
+
+function toDisplayGroupName(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return '';
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function detectGroupFromEndpoint(endpoint) {
+    const raw = String(endpoint || '').trim();
+    if (!raw) return '';
+
+    const withProtocol = raw.includes('://') ? raw : `https://${raw}`;
+    let hostname = '';
+    try {
+        hostname = new URL(withProtocol).hostname.toLowerCase().replace(/^www\./, '');
+    } catch {
+        return '';
+    }
+
+    const parts = hostname.split('.').filter(Boolean);
+    if (parts.length === 0) return '';
+
+    for (const part of parts) {
+        if (AUTO_GROUP_HOST_SKIP.has(part)) continue;
+        if (AUTO_GROUP_TLD_SKIP.has(part)) continue;
+        if (part.length < 2) continue;
+        return toDisplayGroupName(part);
+    }
+
+    if (parts.length >= 2) {
+        return toDisplayGroupName(parts[parts.length - 2]);
+    }
+
+    return toDisplayGroupName(parts[0]);
+}
+
+function detectGroupFromName(name) {
+    const text = String(name || '').trim();
+    if (!text) return '';
+
+    const separators = ['-', '_', '·', '/', '|', '：', ':', ' '];
+    let splitIndex = -1;
+    for (const separator of separators) {
+        const index = text.indexOf(separator);
+        if (index > 1 && (splitIndex === -1 || index < splitIndex)) {
+            splitIndex = index;
+        }
+    }
+
+    if (splitIndex > 1) {
+        const candidate = text.slice(0, splitIndex).trim();
+        if (candidate.length >= 2) return candidate;
+    }
+
+    const firstToken = text.split(/\s+/).find(Boolean);
+    if (firstToken && firstToken.length >= 2) {
+        return firstToken;
+    }
+
+    return '';
+}
+
+function detectAutoGroup({ name, source, customUrl, reverseProxy }) {
+    const normalizedSource = normalizeSource(source);
+    const endpoint = normalizedSource === CHAT_COMPLETION_SOURCES.CUSTOM ? customUrl : reverseProxy;
+    const endpointGroup = detectGroupFromEndpoint(endpoint);
+    if (endpointGroup) return endpointGroup;
+
+    const nameGroup = detectGroupFromName(name);
+    if (nameGroup) return nameGroup;
+
+    return normalizedSource === CHAT_COMPLETION_SOURCES.MAKERSUITE ? 'Google' : 'Custom';
 }
 
 function getModelSelectSelector(source) {
@@ -197,26 +299,49 @@ function initSettings() {
         extension_settings[MODULE_NAME].collapsedGroups = {};
     }
 
+    let migrated = false;
+
     // 兼容旧配置结构
     for (const config of extension_settings[MODULE_NAME].configs) {
         if (!config || typeof config !== 'object') continue;
 
         if (!config.source) {
             config.source = CHAT_COMPLETION_SOURCES.CUSTOM;
+            migrated = true;
         }
 
         if (config.source === CHAT_COMPLETION_SOURCES.CUSTOM) {
             if (config.customUrl === undefined && typeof config.url === 'string') {
                 config.customUrl = config.url;
+                migrated = true;
             }
-            if (typeof config.customUrl === 'string') {
+            if (typeof config.customUrl === 'string' && config.url !== config.customUrl) {
                 config.url = config.customUrl;
+                migrated = true;
             }
         }
 
         if (config.secretId && (!config.secretIds || typeof config.secretIds !== 'object')) {
             config.secretIds = { [SECRET_KEYS.CUSTOM]: config.secretId };
+            migrated = true;
         }
+
+        if (!String(config.group || '').trim()) {
+            const autoGroup = detectAutoGroup({
+                name: config.name,
+                source: config.source,
+                customUrl: config.customUrl || config.url,
+                reverseProxy: config.reverseProxy,
+            });
+            if (autoGroup) {
+                config.group = autoGroup;
+                migrated = true;
+            }
+        }
+    }
+
+    if (migrated) {
+        saveSettingsDebounced();
     }
 }
 
@@ -534,7 +659,7 @@ function showEndpointSyncToastIfNeeded(syncCount, source) {
 // 保存新配置（从用户输入）
 function saveNewConfig() {
     const name = $('#api-config-name').val().trim();
-    const group = $('#api-config-group').val().trim();
+    const manualGroup = $('#api-config-group').val().trim();
     const source = normalizeSource($('#api-config-source').val());
 
     const customUrl = $('#api-config-url').val().trim();
@@ -542,6 +667,13 @@ function saveNewConfig() {
     const reverseProxy = $('#api-config-reverse-proxy').val().trim();
     const proxyPassword = $('#api-config-proxy-password').val().trim();
     const model = $('#api-config-model').val().trim();
+    const autoGroup = manualGroup || detectAutoGroup({
+        name,
+        source,
+        customUrl,
+        reverseProxy,
+    });
+    const usedAutoGroup = !manualGroup && Boolean(autoGroup);
 
     if (!name) {
         toastr.error('请输入配置名称', 'API配置管理器');
@@ -561,7 +693,7 @@ function saveNewConfig() {
 
     const config = {
         name: name,
-        group: group || undefined,
+        group: autoGroup || undefined,
         source: source,
         url: source === CHAT_COMPLETION_SOURCES.CUSTOM ? customUrl : undefined,
         customUrl: source === CHAT_COMPLETION_SOURCES.CUSTOM ? customUrl : undefined,
@@ -635,6 +767,9 @@ function saveNewConfig() {
     updateFormBySource($('#api-config-source').val());
     updateEditorHeader();
     renderConfigList();
+    if (usedAutoGroup) {
+        toastr.info(`已自动识别分组: ${autoGroup}`, 'API配置管理器');
+    }
 }
 
 function updateFormBySource(sourceValue) {
@@ -911,6 +1046,42 @@ function updateEditorHeader() {
     $('#api-config-editor-mode').text(modeText);
 }
 
+function normalizePopupCloseButton(popupContent) {
+    const applyStyle = () => {
+        const popupRoot = popupContent.closest('.popup, .dialogue_popup, .modal, .popup-window');
+        const searchScope = popupRoot.length ? popupRoot : $(document.body);
+        const closeButton = searchScope.find('button, .menu_button, input[type="button"]').filter(function () {
+            const text = String($(this).text() || $(this).val() || '').trim();
+            return text === '关闭';
+        }).last();
+
+        if (!closeButton.length) return false;
+
+        closeButton.css({
+            minWidth: '96px',
+            whiteSpace: 'nowrap',
+            writingMode: 'horizontal-tb',
+            lineHeight: '1.2',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '0 12px',
+            height: '36px',
+            borderRadius: '10px',
+            border: '1px solid #2f3a4a',
+            background: '#131923',
+            color: '#eff4ff',
+        });
+
+        return true;
+    };
+
+    if (!applyStyle()) {
+        setTimeout(applyStyle, 40);
+        setTimeout(applyStyle, 140);
+    }
+}
+
 // 编辑配置
 function editConfig(index) {
     const config = extension_settings[MODULE_NAME].configs[index];
@@ -1029,7 +1200,7 @@ function buildPopupSettingsHtml() {
                             </div>
                             <div>
                                 <label class="api-config-label" for="api-config-group">分组</label>
-                                <input type="text" id="api-config-group" placeholder="可选分组" class="text_pole">
+                                <input type="text" id="api-config-group" placeholder="可选分组（留空自动识别）" class="text_pole">
                             </div>
                         </div>
 
@@ -1091,6 +1262,7 @@ async function openConfigPopup() {
     updateFormBySource($('#api-config-source').val());
     updateEditorHeader();
     renderConfigList();
+    normalizePopupCloseButton(popupContent);
 
     await popupPromise;
 }

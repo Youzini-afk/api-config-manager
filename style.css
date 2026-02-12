@@ -193,18 +193,26 @@
 }
 
 .api-config-new-entry {
+    width: 100%;
     height: 38px;
     border-radius: 12px;
     border: 1px solid #293243;
     background: #0f141d;
     color: #f3f6ff;
-    font-size: 24px;
-    font-weight: 500;
+    font-size: 18px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+    line-height: 1;
+    writing-mode: horizontal-tb;
 }
 
 .api-config-new-entry i {
     font-size: 13px;
-    margin-right: 4px;
+    margin-right: 0;
 }
 
 .api-config-main {
@@ -414,6 +422,21 @@
     padding: 20px 12px;
     margin-top: 6px;
     font-size: 13px;
+}
+
+.popup:has(.api-config-popup) .popup-button-container .menu_button,
+.popup:has(.api-config-popup) .popup-controls .menu_button,
+.dialogue_popup:has(.api-config-popup) .popup-button-container .menu_button,
+.dialogue_popup:has(.api-config-popup) .popup-controls .menu_button {
+    min-width: 96px;
+    white-space: nowrap;
+    writing-mode: horizontal-tb;
+    line-height: 1.2;
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid #2f3a4a;
+    background: #131923;
+    color: #eff4ff;
 }
 
 @media (max-width: 1080px) {
