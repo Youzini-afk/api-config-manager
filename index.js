@@ -92,6 +92,7 @@ const defaultSettings = {
     configs: [], // 存储配置列表: [{name: string, url: string, key: string, model?: string}]
     collapsedGroups: {}, // 存储折叠状态: {groupName: boolean}
     listSortMode: LIST_SORT_MODES.GROUP,
+    lastAppliedSignature: null,
 };
 
 // 编辑状态
@@ -263,6 +264,91 @@ function getModelSelectSelector(source) {
     return SOURCE_MODEL_SELECTORS[normalizeSource(source)] || SOURCE_MODEL_SELECTORS[CHAT_COMPLETION_SOURCES.CUSTOM];
 }
 
+function buildConfigRuntimeSignature(config, sourceOverride = null) {
+    const source = normalizeSource(sourceOverride ?? config?.source);
+    return {
+        source,
+        endpoint: getConfigEndpointValue(config, source),
+        model: String(config?.model || '').trim(),
+        name: String(config?.name || '').trim(),
+    };
+}
+
+function getCurrentRuntimeConnectionSnapshot() {
+    const sourceFromUi = $('#chat_completion_source').val();
+    const sourceFromSettings = typeof oai_settings !== 'undefined' ? oai_settings?.chat_completion_source : null;
+    const source = normalizeSource(sourceFromUi || sourceFromSettings);
+
+    const customEndpoint = String(
+        $('#custom_api_url_text').val() || (typeof oai_settings !== 'undefined' ? oai_settings?.custom_url : '') || ''
+    ).trim();
+    const reverseProxy = String(
+        $('#openai_reverse_proxy').val() || (typeof oai_settings !== 'undefined' ? oai_settings?.reverse_proxy : '') || ''
+    ).trim();
+    const endpoint = source === CHAT_COMPLETION_SOURCES.CUSTOM ? customEndpoint : reverseProxy;
+
+    const selectorModel = String($(getModelSelectSelector(source)).val() || '').trim();
+    const modelSettingKey = SOURCE_MODEL_SETTING_KEYS[source];
+    const settingsModel =
+        typeof oai_settings !== 'undefined' && modelSettingKey
+            ? String(oai_settings?.[modelSettingKey] || '').trim()
+            : '';
+
+    return {
+        source,
+        endpoint,
+        model: selectorModel || settingsModel,
+    };
+}
+
+function isSameConfigSignature(a, b) {
+    if (!a || !b) return false;
+    return normalizeSource(a.source) === normalizeSource(b.source)
+        && String(a.endpoint || '').trim() === String(b.endpoint || '').trim()
+        && String(a.model || '').trim() === String(b.model || '').trim()
+        && String(a.name || '').trim() === String(b.name || '').trim();
+}
+
+function hasConfigMatchingSignature(configs, signature) {
+    if (!signature || !Array.isArray(configs)) return false;
+    return configs.some(config => isSameConfigSignature(buildConfigRuntimeSignature(config), signature));
+}
+
+function findActiveConfigIndex(configs) {
+    if (!Array.isArray(configs) || configs.length === 0) return -1;
+
+    const current = getCurrentRuntimeConnectionSnapshot();
+    const lastApplied = extension_settings?.[MODULE_NAME]?.lastAppliedSignature;
+    const candidates = [];
+
+    configs.forEach((config, index) => {
+        const signature = buildConfigRuntimeSignature(config);
+        if (signature.source !== current.source) return;
+        if (signature.endpoint !== current.endpoint) return;
+
+        let score = 1;
+        if (signature.model && current.model && signature.model === current.model) {
+            score += 2;
+        }
+        if (lastApplied && isSameConfigSignature(signature, lastApplied)) {
+            score += 3;
+        }
+        candidates.push({ index, score });
+    });
+
+    if (candidates.length > 0) {
+        candidates.sort((a, b) => (b.score - a.score) || (a.index - b.index));
+        return candidates[0].index;
+    }
+
+    if (lastApplied) {
+        const matchedByLastApplied = configs.findIndex(config => isSameConfigSignature(buildConfigRuntimeSignature(config), lastApplied));
+        if (matchedByLastApplied >= 0) return matchedByLastApplied;
+    }
+
+    return -1;
+}
+
 function setChatCompletionSource(source) {
     const normalized = normalizeSource(source);
     $('#chat_completion_source').val(normalized).trigger('change');
@@ -326,23 +412,33 @@ function initSettings() {
     if (!extension_settings[MODULE_NAME]) {
         extension_settings[MODULE_NAME] = defaultSettings;
     }
-    
+
+    let migrated = false;
+
     // 确保configs数组存在
     if (!extension_settings[MODULE_NAME].configs) {
         extension_settings[MODULE_NAME].configs = [];
+        migrated = true;
     }
 
     // 确保collapsedGroups对象存在
     if (!extension_settings[MODULE_NAME].collapsedGroups) {
         extension_settings[MODULE_NAME].collapsedGroups = {};
+        migrated = true;
     }
 
     if (!Object.values(LIST_SORT_MODES).includes(extension_settings[MODULE_NAME].listSortMode)) {
         extension_settings[MODULE_NAME].listSortMode = LIST_SORT_MODES.GROUP;
-        saveSettingsDebounced();
+        migrated = true;
     }
 
-    let migrated = false;
+    if (
+        extension_settings[MODULE_NAME].lastAppliedSignature !== null
+        && typeof extension_settings[MODULE_NAME].lastAppliedSignature !== 'object'
+    ) {
+        extension_settings[MODULE_NAME].lastAppliedSignature = null;
+        migrated = true;
+    }
 
     // 兼容旧配置结构
     for (const config of extension_settings[MODULE_NAME].configs) {
@@ -381,6 +477,12 @@ function initSettings() {
                 migrated = true;
             }
         }
+    }
+
+    const lastAppliedSignature = extension_settings[MODULE_NAME].lastAppliedSignature;
+    if (lastAppliedSignature && !hasConfigMatchingSignature(extension_settings[MODULE_NAME].configs, lastAppliedSignature)) {
+        extension_settings[MODULE_NAME].lastAppliedSignature = null;
+        migrated = true;
     }
 
     if (migrated) {
@@ -425,8 +527,12 @@ async function applyConfig(config) {
         // 通过secrets系统设置密钥（仅在配置里填写了key时覆盖/激活）
         await setSourceSecretIfProvided(source, config.name, config.key, config);
 
+        // 记录最近一次应用的配置，用于左侧状态高亮判定
+        extension_settings[MODULE_NAME].lastAppliedSignature = buildConfigRuntimeSignature(config, source);
+
         // 保存设置
         saveSettingsDebounced();
+        renderConfigList();
 
         // 显示应用成功消息
         toastr.success(`正在连接到: ${config.name}（${getSourceLabel(source)}）`, 'API配置管理器');
@@ -988,8 +1094,14 @@ async function checkAndPromptUpdate() {
 // 删除配置
 function deleteConfig(index) {
     const config = extension_settings[MODULE_NAME].configs[index];
+    if (!config) return;
     if (confirm(`确定要删除配置 "${config.name}" 吗？`)) {
+        const removedSignature = buildConfigRuntimeSignature(config);
         extension_settings[MODULE_NAME].configs.splice(index, 1);
+        const lastAppliedSignature = extension_settings[MODULE_NAME].lastAppliedSignature;
+        if (lastAppliedSignature && isSameConfigSignature(removedSignature, lastAppliedSignature)) {
+            extension_settings[MODULE_NAME].lastAppliedSignature = null;
+        }
         let handledByCancel = false;
         if (editingIndex === index) {
             cancelEditConfig(false);
@@ -1013,6 +1125,7 @@ function renderConfigList() {
 
     const configs = extension_settings[MODULE_NAME].configs;
     const sortMode = getListSortMode();
+    const activeConfigIndex = findActiveConfigIndex(configs);
     $('#api-config-summary-count').text(String(configs.length));
     $('#api-config-inline-count').text(String(configs.length));
     const sortButton = $('#api-config-sort-toggle');
@@ -1081,6 +1194,9 @@ function renderConfigList() {
             : '';
         const avatarText = escapeHtml((config.name || 'A').charAt(0).toLowerCase());
         const isActive = editingIndex === index ? 'is-active' : '';
+        const isEnabled = activeConfigIndex === index;
+        const stateClass = isEnabled ? 'is-on' : 'is-off';
+        const stateText = isEnabled ? 'ON' : 'OFF';
 
         if (sortMode === LIST_SORT_MODES.GROUP && configGroup !== lastGroup) {
             const groupHeader = $(`
@@ -1103,7 +1219,7 @@ function renderConfigList() {
                     </div>
                 </div>
                 <div class="api-config-provider-right">
-                    <span class="api-config-provider-state">ON</span>
+                    <span class="api-config-provider-state ${stateClass}">${stateText}</span>
                 </div>
             </div>
         `);
@@ -1159,7 +1275,7 @@ function normalizePopupCloseButton(popupContent) {
     const forceButtonStyles = (buttons) => {
         const styleEntries = [
             ['min-width', '96px'],
-            ['width', 'auto'],
+            ['width', 'max-content'],
             ['max-width', 'none'],
             ['height', '36px'],
             ['padding', '0 12px'],
@@ -1184,6 +1300,25 @@ function normalizePopupCloseButton(popupContent) {
         });
     };
 
+    const forceDescendantTextHorizontal = (button) => {
+        button.find('*').each(function () {
+            this.style.setProperty('writing-mode', 'horizontal-tb', 'important');
+            this.style.setProperty('text-orientation', 'mixed', 'important');
+            this.style.setProperty('white-space', 'nowrap', 'important');
+            this.style.setProperty('word-break', 'keep-all', 'important');
+            this.style.setProperty('display', 'inline', 'important');
+        });
+    };
+
+    const findCloseButtonsByText = (scope) => {
+        return scope
+            .find('button, .menu_button, .popup-button, input[type="button"], input[type="submit"], a')
+            .filter(function () {
+                const text = String($(this).text() || $(this).val() || '').replace(/\s+/g, '').trim().toLowerCase();
+                return text === '关闭' || text === 'close';
+            });
+    };
+
     const applyStyle = () => {
         const popupRoot = getPopupHostByContent(popupContent);
         if (popupRoot.length) {
@@ -1197,20 +1332,28 @@ function normalizePopupCloseButton(popupContent) {
         footerButtons.addClass('api-config-popup-action-btn');
         forceButtonStyles(footerButtons);
 
-        const closeButton = footerButtons.filter(function () {
-            const text = String($(this).text() || $(this).val() || '').trim();
-            return text === '关闭' || text.toLowerCase() === 'close';
-        }).last();
+        const closeButtonsByText = findCloseButtonsByText(searchScope);
+        if (closeButtonsByText.length) {
+            closeButtonsByText.addClass('api-config-popup-close-btn');
+            forceButtonStyles(closeButtonsByText);
+            closeButtonsByText.each(function () {
+                forceDescendantTextHorizontal($(this));
+            });
+            return true;
+        }
+
+        const closeButton = footerButtons.filter('#dialogue_popup_ok, #dialogue_popup_cancel').last();
 
         if (!closeButton.length) return false;
 
         closeButton.addClass('api-config-popup-close-btn');
         forceButtonStyles(closeButton);
+        forceDescendantTextHorizontal(closeButton);
 
         return true;
     };
 
-    for (const delay of [0, 50, 140, 320, 700, 1200]) {
+    for (const delay of [0, 50, 140, 320, 700, 1200, 2000, 3200]) {
         setTimeout(applyStyle, delay);
     }
 }

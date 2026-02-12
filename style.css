@@ -224,13 +224,19 @@
 .api-config-provider-state {
     min-width: 36px;
     text-align: center;
-    border: 1px solid #1f4b2a;
+    border: 1px solid #394455;
     border-radius: 999px;
-    color: #68ea8a;
-    background: rgba(59, 194, 95, 0.14);
+    color: #9aa6bd;
+    background: rgba(116, 129, 151, 0.12);
     font-size: 11px;
     font-weight: 700;
     padding: 2px 7px;
+}
+
+.api-config-provider-state.is-on {
+    border-color: #1f4b2a;
+    color: #68ea8a;
+    background: rgba(59, 194, 95, 0.14);
 }
 
 .api-config-new-entry {
@@ -512,13 +518,15 @@
 
 .api-config-popup-host .api-config-popup-action-btn,
 .api-config-popup-host .api-config-popup-close-btn,
+.api-config-popup-host #dialogue_popup_ok,
+.api-config-popup-host #dialogue_popup_cancel,
 .api-config-popup-host .popup-button-container .menu_button,
 .api-config-popup-host .popup-controls .menu_button,
 .api-config-popup-host .popup-button-container button,
 .api-config-popup-host .popup-controls button,
 .api-config-popup-host .popup-button {
     min-width: 96px !important;
-    width: auto !important;
+    width: max-content !important;
     max-width: none !important;
     height: 36px !important;
     padding: 0 12px !important;
@@ -534,6 +542,15 @@
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
+}
+
+.api-config-popup-host .api-config-popup-close-btn *,
+.api-config-popup-host #dialogue_popup_ok *,
+.api-config-popup-host #dialogue_popup_cancel * {
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
 }
 
 @media (max-width: 1080px) {
