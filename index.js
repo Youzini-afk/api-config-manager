@@ -556,6 +556,7 @@ function updateFormBySource(sourceValue) {
     const $proxyPassword = $('#api-config-proxy-password');
     const $fetchModels = $('#api-config-fetch-models');
     const $hint = $('#api-config-source-hint');
+    const $sourceChip = $('#api-config-source-chip');
 
     if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
         $customUrl.show().attr('placeholder', 'Custom API URL (例如: https://api.openai.com/v1)');
@@ -564,6 +565,7 @@ function updateFormBySource(sourceValue) {
         $proxyPassword.hide();
         $fetchModels.prop('disabled', false);
         $hint.text('Custom：使用OpenAI兼容接口（可用于反代OpenAI兼容服务）。');
+        $sourceChip.text('当前来源：Custom').removeClass('is-makersuite').addClass('is-custom');
     } else if (source === CHAT_COMPLETION_SOURCES.MAKERSUITE) {
         $customUrl.hide();
         $apiKey.show().attr('placeholder', 'Google AI Studio API Key (可选；不填则使用酒馆已保存的密钥)');
@@ -571,6 +573,7 @@ function updateFormBySource(sourceValue) {
         $proxyPassword.show().attr('placeholder', '反代密码/Key (可选；反代需要时填写)');
         $fetchModels.prop('disabled', false);
         $hint.text('Google AI Studio：支持直接Key或使用反代（reverse_proxy + proxy_password）。');
+        $sourceChip.text('当前来源：Google AI Studio').removeClass('is-custom').addClass('is-makersuite');
     }
 }
 
@@ -731,6 +734,7 @@ function renderConfigList() {
     container.empty();
 
     const configs = extension_settings[MODULE_NAME].configs;
+    $('#api-config-summary-count').text(String(configs.length));
 
     if (configs.length === 0) {
         container.append('<div class="api-config-empty">暂无保存的配置</div>');
@@ -763,6 +767,10 @@ function renderConfigList() {
 
         groupItems.forEach(({ config, index }) => {
             const sourceLabel = getSourceLabel(config.source);
+            const endpointSummary = normalizeSource(config.source) === CHAT_COMPLETION_SOURCES.CUSTOM
+                ? (config.customUrl || config.url || '未填写Custom URL')
+                : (config.reverseProxy ? `反代: ${config.reverseProxy}` : '使用默认AI Studio连接');
+            const secretSummary = config.key ? '保存时覆盖密钥' : '沿用现有密钥';
             const configItem = $(`
                 <div class="api-config-item">
                     <div class="api-config-info">
@@ -770,12 +778,17 @@ function renderConfigList() {
                             ${config.name}
                             <span class="api-config-source-tag">${sourceLabel}</span>
                         </div>
+                        <div class="api-config-endpoint">${endpointSummary}</div>
+                        <div class="api-config-meta">
+                            <span class="api-config-pill">${secretSummary}</span>
+                            ${config.group ? `<span class="api-config-pill">分组: ${config.group}</span>` : ''}
+                        </div>
                         ${config.model ? `<div class="api-config-model">首选模型: ${config.model}</div>` : '<div class="api-config-no-model">未设置模型</div>'}
                     </div>
                     <div class="api-config-actions">
-                        <button class="menu_button api-config-apply" data-index="${index}">应用</button>
-                        <button class="menu_button api-config-edit" data-index="${index}">编辑</button>
-                        <button class="menu_button api-config-delete" data-index="${index}">删除</button>
+                        <button class="menu_button api-config-apply" data-index="${index}"><i class="fa-solid fa-bolt"></i> 应用</button>
+                        <button class="menu_button api-config-edit" data-index="${index}"><i class="fa-solid fa-pen"></i> 编辑</button>
+                        <button class="menu_button api-config-delete" data-index="${index}"><i class="fa-solid fa-trash"></i> 删除</button>
                     </div>
                 </div>
             `);
@@ -849,47 +862,67 @@ function cancelEditConfig() {
 function buildPopupSettingsHtml() {
     return `
         <div class="api_config_settings api-config-popup">
-            <div class="api-config-header">
-                <div class="api-config-title">
-                    <b>API配置管理器</b>
-                    <span class="api-config-version">v${EXTENSION_INFO.version}</span>
-                </div>
-                <div class="api-config-actions">
-                    <button id="api-config-update" class="menu_button api-config-update-btn" title="检查并更新扩展">
-                        <i class="fa-solid fa-download"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="api-config-section">
-                <h4>添加新配置</h4>
-                <div class="flex-container flexFlowColumn flexGap5">
-                    <input type="text" id="api-config-name" placeholder="配置名称 (例如: OpenAI GPT-4)" class="text_pole">
-                    <input type="text" id="api-config-group" placeholder="分组名称 (可选，例如: 工作用)" class="text_pole">
-                    <select id="api-config-source" class="text_pole">
-                        <option value="${CHAT_COMPLETION_SOURCES.CUSTOM}">Custom (OpenAI兼容)</option>
-                        <option value="${CHAT_COMPLETION_SOURCES.MAKERSUITE}">Google AI Studio</option>
-                    </select>
-                    <input type="text" id="api-config-url" placeholder="Custom API URL (例如: https://api.openai.com/v1)" class="text_pole">
-                    <input type="password" id="api-config-key" placeholder="API密钥 (可选)" class="text_pole">
-                    <input type="text" id="api-config-reverse-proxy" placeholder="反代服务器URL (可选)" class="text_pole" style="display: none;">
-                    <input type="password" id="api-config-proxy-password" placeholder="反代密码/Token (可选)" class="text_pole" style="display: none;">
-                    <div class="flex-container flexGap5 model-input-container">
-                        <input type="text" id="api-config-model" placeholder="首选模型 (可选，例如: gpt-4)" class="text_pole" style="flex: 1;">
-                        <button id="api-config-fetch-models" class="menu_button" style="white-space: nowrap;">获取模型</button>
+            <div class="api-config-hero">
+                <div class="api-config-header">
+                    <div class="api-config-title">
+                        <i class="fa-solid fa-server"></i>
+                        <div>
+                            <b>API配置管理器</b>
+                            <div class="api-config-subtitle">统一管理多个服务商配置，快速切换连接</div>
+                        </div>
+                        <span class="api-config-version">v${EXTENSION_INFO.version}</span>
                     </div>
-                    <select id="api-config-model-select" class="text_pole" style="display: none;">
-                        <option value="">选择模型...</option>
-                    </select>
-                    <div class="flex-container flexGap5 button-container">
-                        <button id="api-config-save" class="menu_button">保存配置</button>
-                        <button id="api-config-cancel" class="menu_button" style="display: none;">❌ 取消</button>
+                    <div class="api-config-header-actions">
+                        <button id="api-config-update" class="menu_button api-config-update-btn" title="检查并更新扩展">
+                            <i class="fa-solid fa-download"></i>
+                        </button>
                     </div>
                 </div>
-                <small id="api-config-source-hint">Custom：使用OpenAI兼容接口（可用于反代OpenAI兼容服务）。</small>
+                <div class="api-config-hero-stats">
+                    <div class="api-config-stat-card">
+                        <span id="api-config-summary-count">0</span>
+                        <small>已保存配置</small>
+                    </div>
+                    <div id="api-config-source-chip" class="api-config-source-chip is-custom">当前来源：Custom</div>
+                </div>
             </div>
-            <div class="api-config-section">
-                <h4>已保存的配置</h4>
-                <div id="api-config-list"></div>
+
+            <div class="api-config-layout">
+                <div class="api-config-section api-config-section-form">
+                    <h4>新增或编辑配置</h4>
+                    <div class="flex-container flexFlowColumn flexGap5">
+                        <input type="text" id="api-config-name" placeholder="配置名称 (例如: OpenAI GPT-4)" class="text_pole">
+                        <input type="text" id="api-config-group" placeholder="分组名称 (可选，例如: 工作用)" class="text_pole">
+                        <select id="api-config-source" class="text_pole">
+                            <option value="${CHAT_COMPLETION_SOURCES.CUSTOM}">Custom (OpenAI兼容)</option>
+                            <option value="${CHAT_COMPLETION_SOURCES.MAKERSUITE}">Google AI Studio</option>
+                        </select>
+                        <input type="text" id="api-config-url" placeholder="Custom API URL (例如: https://api.openai.com/v1)" class="text_pole">
+                        <input type="password" id="api-config-key" placeholder="API密钥 (可选)" class="text_pole">
+                        <input type="text" id="api-config-reverse-proxy" placeholder="反代服务器URL (可选)" class="text_pole" style="display: none;">
+                        <input type="password" id="api-config-proxy-password" placeholder="反代密码/Token (可选)" class="text_pole" style="display: none;">
+                        <div class="flex-container flexGap5 model-input-container">
+                            <input type="text" id="api-config-model" placeholder="首选模型 (可选，例如: gpt-4)" class="text_pole api-config-model-input">
+                            <button id="api-config-fetch-models" class="menu_button">获取模型</button>
+                        </div>
+                        <select id="api-config-model-select" class="text_pole" style="display: none;">
+                            <option value="">选择模型...</option>
+                        </select>
+                        <div class="flex-container flexGap5 button-container">
+                            <button id="api-config-save" class="menu_button"><i class="fa-solid fa-floppy-disk"></i> 保存配置</button>
+                            <button id="api-config-cancel" class="menu_button" style="display: none;"><i class="fa-solid fa-ban"></i> 取消</button>
+                        </div>
+                    </div>
+                    <small id="api-config-source-hint">Custom：使用OpenAI兼容接口（可用于反代OpenAI兼容服务）。</small>
+                </div>
+
+                <div class="api-config-section api-config-section-list">
+                    <div class="api-config-list-header">
+                        <h4>配置库</h4>
+                        <small>按分组管理，点击“应用”即可切换</small>
+                    </div>
+                    <div id="api-config-list"></div>
+                </div>
             </div>
         </div>
     `;

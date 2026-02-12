@@ -1,208 +1,303 @@
-/* API配置管理器样式 */
-
-/* 确保在所有主题下的可见性 */
-.api_config_settings *,
-#api-config-manager * {
-    box-sizing: border-box;
-}
+/* API Config Manager - modern popup UI */
 
 .api_config_settings,
 #api-config-manager {
     color: var(--SmartThemeBodyColor);
 }
 
-/* 头部样式 */
+.api_config_settings *,
+#api-config-manager * {
+    box-sizing: border-box;
+}
+
+.api-config-popup {
+    --acm-border: var(--SmartThemeBorderColor);
+    --acm-surface: var(--SmartThemeBlurTintColor);
+    --acm-surface-soft: var(--SmartThemeBotMesBlurTintColor);
+    --acm-accent: #34b3c1;
+    --acm-accent-soft: rgba(52, 179, 193, 0.18);
+    --acm-danger: #df6f6f;
+    border: 1px solid var(--acm-border);
+    border-radius: 16px;
+    background:
+        radial-gradient(circle at 88% -10%, rgba(52, 179, 193, 0.20) 0, rgba(52, 179, 193, 0) 44%),
+        radial-gradient(circle at 15% -20%, rgba(248, 182, 84, 0.18) 0, rgba(248, 182, 84, 0) 42%),
+        var(--acm-surface);
+    margin: 0;
+    padding: 14px;
+}
+
+.api-config-hero {
+    border: 1px solid var(--acm-border);
+    border-radius: 14px;
+    padding: 12px;
+    background:
+        linear-gradient(125deg, rgba(52, 179, 193, 0.18), rgba(248, 182, 84, 0.12)),
+        var(--acm-surface-soft);
+    margin-bottom: 12px;
+}
+
 .api-config-header {
     display: flex;
+    align-items: flex-start;
     justify-content: space-between;
-    align-items: center;
-    width: 100%;
-    margin-right: 10px;
+    gap: 10px;
 }
 
 .api-config-title {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+}
+
+.api-config-title > i {
+    margin-top: 2px;
+    font-size: 15px;
+    color: var(--acm-accent);
+}
+
+.api-config-title b {
+    font-size: 17px;
+    letter-spacing: 0.2px;
+}
+
+.api-config-subtitle {
+    margin-top: 3px;
+    font-size: 12px;
+    opacity: 0.84;
 }
 
 .api-config-version {
-    font-size: 0.8em;
-    opacity: 0.7;
-    font-weight: normal;
-    background: var(--SmartThemeUserMesBlurTintColor);
-    padding: 2px 6px;
-    border-radius: 3px;
-    border: 1px solid var(--SmartThemeBorderColor);
-    color: var(--SmartThemeBodyColor);
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    margin-top: 1px;
+    font-size: 11px;
+    border: 1px solid var(--acm-border);
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    opacity: 0.9;
+    white-space: nowrap;
 }
 
-.api-config-actions {
+.api-config-header-actions {
     display: flex;
-    gap: 5px;
+    align-items: center;
 }
 
 .api-config-update-btn {
-    padding: 4px 8px !important;
-    font-size: 12px !important;
-    min-width: 32px;
-    height: 24px;
-    border-radius: 3px;
-    transition: all 0.2s ease;
+    min-width: 34px;
+    height: 30px;
+    border-radius: 10px;
+    padding: 0 10px !important;
+    background: var(--acm-accent-soft);
+    border: 1px solid rgba(52, 179, 193, 0.45);
 }
 
-/* 按钮容器样式 - 确保横向布局 */
+.api-config-update-btn:hover {
+    transform: translateY(-1px);
+}
+
+.api-config-hero-stats {
+    margin-top: 12px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.api-config-stat-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 120px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--acm-border);
+    background: rgba(10, 14, 19, 0.18);
+}
+
+.api-config-stat-card span {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--acm-accent);
+}
+
+.api-config-stat-card small {
+    margin-top: 4px;
+    font-size: 11px;
+    opacity: 0.82;
+}
+
+.api-config-source-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    border: 1px solid var(--acm-border);
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.api-config-source-chip.is-custom {
+    border-color: rgba(52, 179, 193, 0.55);
+    color: #7fdbe5;
+}
+
+.api-config-source-chip.is-makersuite {
+    border-color: rgba(248, 182, 84, 0.6);
+    color: #ffd499;
+}
+
+.api-config-layout {
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+}
+
+.api-config-section {
+    border: 1px solid var(--acm-border);
+    border-radius: 14px;
+    background: var(--acm-surface-soft);
+    padding: 12px;
+}
+
+.api-config-section h4 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    color: var(--SmartThemeEmColor);
+}
+
+.api-config-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.api-config-list-header small {
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+.api-config-popup .text_pole {
+    border-radius: 10px;
+    border: 1px solid var(--acm-border);
+    background: rgba(12, 17, 24, 0.28);
+    padding: 9px 10px;
+}
+
+.api-config-popup .text_pole:focus {
+    border-color: rgba(52, 179, 193, 0.6);
+    box-shadow: 0 0 0 1px rgba(52, 179, 193, 0.24);
+}
+
+.api_config_settings .model-input-container {
+    display: flex !important;
+    gap: 8px !important;
+    align-items: center !important;
+}
+
+.api-config-model-input {
+    flex: 1;
+}
+
 .api_config_settings .button-container {
     display: flex !important;
-    flex-direction: row !important;
     gap: 8px !important;
     align-items: center !important;
     flex-wrap: nowrap !important;
 }
 
-/* 模型输入容器样式 */
-.api_config_settings .model-input-container {
-    display: flex !important;
-    flex-direction: row !important;
-    gap: 8px !important;
-    align-items: center !important;
-}
-
-/* 保存按钮样式 */
 #api-config-save {
     flex: 1 !important;
-    min-width: 100px !important;
-    white-space: nowrap !important;
+    min-width: 130px;
 }
 
-/* 取消按钮样式 */
 #api-config-cancel {
+    min-width: 90px;
+}
+
+#api-config-save,
+#api-config-cancel,
+#api-config-fetch-models {
+    border-radius: 10px !important;
     padding: 8px 12px !important;
-    border-radius: 4px !important;
-    font-size: 13px !important;
-    cursor: pointer !important;
-    transition: all 0.2s ease !important;
-    white-space: nowrap !important;
-    min-width: 70px !important;
-    max-width: 80px !important;
-    flex-shrink: 0 !important;
-    height: auto !important;
-    line-height: 1.2 !important;
+    white-space: nowrap;
 }
 
-#api-config-cancel:hover {
-    transform: translateY(-1px) !important;
+.api-config-popup .menu_button {
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-/* 强制按钮在白色主题下可见 */
-.api_config_settings .menu_button,
-#api-config-manager .menu_button {
-    position: relative;
-    z-index: 1;
-    transition: all 0.2s ease;
+.api-config-popup .menu_button:hover {
+    transform: translateY(-1px);
 }
 
-.api_config_settings {
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 5px;
-    margin: 15px 0;
-    background: var(--SmartThemeBlurTintColor);
+#api-config-source-hint {
+    display: block;
+    margin-top: 7px;
+    opacity: 0.78;
+    line-height: 1.35;
 }
 
-.api-config-popup {
-    margin: 0;
-}
-
-.api-config-popup .api-config-header {
-    padding-bottom: 8px;
-    margin-bottom: 10px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor);
-}
-
-/* 当在API连接界面时的特殊样式 */
-#openai_api .api_config_settings,
-#custom_form + .api_config_settings {
-    margin-top: 20px;
-    border-color: var(--SmartThemeEmColor);
-    background: var(--SmartThemeBlurTintColor);
-}
-
-#api-config-manager {
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 5px;
-    margin: 5px 0;
-    background: var(--SmartThemeBlurTintColor);
-}
-
-#api-config-content {
-    padding: 10px;
-    border-top: 1px solid var(--SmartThemeBorderColor);
-}
-
-.api-config-section {
-    margin-bottom: 15px;
-}
-
-.api-config-section h4 {
-    margin: 0 0 8px 0;
-    color: var(--SmartThemeEmColor);
-    font-size: 14px;
+#api-config-list {
+    max-height: min(56vh, 560px);
+    overflow: auto;
+    padding-right: 4px;
 }
 
 .api-config-group-header {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 12px;
-    margin: 12px 0 0 0;
-    background: var(--SmartThemeBotMesBlurTintColor);
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 6px;
+    padding: 10px 11px;
+    margin: 10px 0 0;
+    border: 1px solid var(--acm-border);
+    border-radius: 10px;
     cursor: pointer;
-    transition: all 0.2s ease;
     font-weight: 600;
     color: var(--SmartThemeEmColor);
+    background: rgba(255, 255, 255, 0.05);
+    transition: border-color 0.2s ease, background 0.2s ease;
 }
 
 .api-config-group-header:hover {
-    background: var(--SmartThemeUserMesBlurTintColor);
-    border-color: var(--SmartThemeEmColor);
-}
-
-.api-config-group-header i {
-    transition: transform 0.2s ease;
-    font-size: 12px;
+    border-color: rgba(52, 179, 193, 0.55);
+    background: rgba(52, 179, 193, 0.10);
 }
 
 .api-config-group-count {
-    font-size: 12px;
-    opacity: 0.7;
-    font-weight: normal;
+    font-size: 11px;
+    opacity: 0.72;
 }
 
 .api-config-group-content {
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
 .api-config-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px;
+    gap: 10px;
+    padding: 11px;
     margin: 8px 0;
-    border: 2px solid var(--SmartThemeBorderColor);
-    border-left: 4px solid var(--SmartThemeEmColor);
-    border-radius: 8px;
-    background: var(--SmartThemeUserMesBlurTintColor, var(--SmartThemeBlurTintColor));
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    transition: all 0.3s ease;
-    position: relative;
+    border-radius: 12px;
+    border: 1px solid var(--acm-border);
+    background: rgba(12, 17, 24, 0.34);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .api-config-item:hover {
-    border-color: var(--SmartThemeEmColor);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-    transform: translateY(-2px);
+    border-color: rgba(52, 179, 193, 0.55);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
+    transform: translateY(-1px);
 }
 
 .api-config-info {
@@ -211,251 +306,158 @@
 }
 
 .api-config-name {
-    font-weight: bold;
-    color: var(--SmartThemeBodyColor);
-    margin-bottom: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
     font-size: 14px;
 }
 
 .api-config-source-tag {
-    display: inline-block;
-    margin-left: 8px;
-    font-size: 12px;
-    font-weight: 500;
-    opacity: 0.85;
-    background: var(--SmartThemeBotMesBlurTintColor, var(--SmartThemeUserMesBlurTintColor));
-    border: 1px solid var(--SmartThemeBorderColor);
-    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid var(--acm-border);
     border-radius: 999px;
+    padding: 2px 7px;
+    background: rgba(255, 255, 255, 0.05);
+    opacity: 0.92;
+}
+
+.api-config-endpoint {
+    margin-top: 4px;
+    font-size: 11px;
+    opacity: 0.86;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
+.api-config-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 5px;
+}
+
+.api-config-pill {
+    font-size: 10px;
+    border: 1px solid var(--acm-border);
+    border-radius: 999px;
+    padding: 2px 7px;
+    opacity: 0.82;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.api-config-model,
+.api-config-no-model {
+    margin-top: 6px;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 7px;
+    padding: 3px 7px;
+    border: 1px solid var(--acm-border);
+}
+
 .api-config-model {
-    font-size: 12px;
-    color: var(--SmartThemeBodyColor);
-    font-weight: 500;
-    background: var(--SmartThemeBotMesBlurTintColor, var(--SmartThemeUserMesBlurTintColor));
-    border: 1px solid var(--SmartThemeBorderColor);
-    padding: 2px 6px;
-    border-radius: 3px;
-    display: inline-block;
+    color: #9de9f1;
+    background: rgba(52, 179, 193, 0.14);
 }
 
 .api-config-no-model {
-    font-size: 12px;
-    color: var(--SmartThemeQuoteColor);
+    opacity: 0.72;
     font-style: italic;
-    opacity: 0.7;
 }
 
 .api-config-actions {
     display: flex;
-    gap: 5px;
+    gap: 6px;
     flex-shrink: 0;
 }
 
-.api-config-apply {
-    min-width: 50px;
+.api-config-actions .menu_button {
+    min-width: 78px;
+    padding: 6px 9px;
+    border-radius: 9px;
+    font-size: 12px;
 }
 
-.api-config-delete {
-    min-width: 50px;
-}
-
-.api-config-edit {
-    min-width: 50px;
+.api-config-actions .api-config-delete {
+    border-color: rgba(223, 111, 111, 0.6);
+    color: #ffc5c5;
 }
 
 .api-config-empty {
+    margin-top: 8px;
+    border: 1px dashed var(--acm-border);
+    border-radius: 10px;
     text-align: center;
-    color: var(--SmartThemeQuoteColor);
-    opacity: 0.7;
-    padding: 20px;
-    font-style: italic;
-}
-
-#api-config-name,
-#api-config-url,
-#api-config-key,
-#api-config-model {
-    margin-bottom: 5px;
-}
-
-#api-config-save {
-    padding: 6px 12px !important;
-    white-space: nowrap;
-}
-
-#api-config-fetch-models {
-    padding: 6px 12px !important;
-    white-space: nowrap;
-    font-size: 12px !important;
+    padding: 24px 14px;
+    opacity: 0.75;
 }
 
 #api-config-model-select {
-    margin-bottom: 5px;
-    background: var(--SmartThemeBlurTintColor);
-    color: var(--SmartThemeBodyColor);
-    border: 1px solid var(--SmartThemeBorderColor);
+    background: rgba(12, 17, 24, 0.28);
 }
 
-/* 响应式设计 */
-
-/* 大屏幕 (桌面) */
-@media (min-width: 1200px) {
-    #api-config-content {
-        padding: 15px;
+@media (max-width: 980px) {
+    .api-config-layout {
+        grid-template-columns: 1fr;
     }
 
-    .api-config-item {
-        padding: 15px;
-    }
-
-    .api-config-actions {
-        gap: 8px;
-    }
-
-    .api-config-actions .menu_button {
-        padding: 6px 15px;
-        font-size: 13px;
-        min-width: 70px;
+    #api-config-list {
+        max-height: min(45vh, 420px);
     }
 }
 
-/* 中等屏幕 (平板) */
-@media (max-width: 1199px) and (min-width: 769px) {
-    .api-config-item {
-        padding: 12px;
+@media (max-width: 720px) {
+    .api-config-popup {
+        padding: 10px;
+        border-radius: 12px;
     }
 
-    .api-config-actions {
-        gap: 6px;
-    }
-
-    .api-config-actions .menu_button {
-        padding: 5px 12px;
-        font-size: 12px;
-        min-width: 60px;
-    }
-}
-
-/* 小屏幕 (手机横屏) */
-@media (max-width: 768px) and (min-width: 481px) {
-    .api-config-item {
-        flex-direction: column;
-        align-items: stretch;
-        padding: 12px;
-    }
-
-    .api-config-actions {
-        margin-top: 10px;
-        justify-content: center;
-        gap: 8px;
-    }
-
-    .api-config-actions .menu_button {
-        flex: 1;
-        max-width: 100px;
-        padding: 8px 12px;
-        font-size: 12px;
-    }
-
-    .api-config-name {
-        font-size: 13px;
-    }
-
-    .api-config-model,
-    .api-config-no-model {
-        font-size: 11px;
-    }
-}
-
-/* 超小屏幕 (手机竖屏) */
-@media (max-width: 480px) {
-    #api-config-content {
-        padding: 8px;
-    }
-
-    .api-config-item {
-        flex-direction: column;
-        align-items: stretch;
-        padding: 12px;
-        margin: 8px 0;
-        min-height: auto;
-    }
-
-    .api-config-info {
-        margin-bottom: 12px;
-        word-wrap: break-word;
-        overflow-wrap: break-word;
-    }
-
-    .api-config-name {
-        font-size: 14px;
-        margin-bottom: 8px;
-        line-height: 1.4;
-        word-wrap: break-word;
-    }
-
-    .api-config-model,
-    .api-config-no-model {
-        font-size: 12px;
-        line-height: 1.3;
-        word-wrap: break-word;
-    }
-
-    .api-config-model {
-        padding: 3px 6px;
-        display: inline-block;
-        max-width: 100%;
-        box-sizing: border-box;
-    }
-
-    .api-config-actions {
-        display: flex;
-        flex-direction: row;
-        gap: 8px;
-        justify-content: space-between;
-    }
-
-    .api-config-actions .menu_button {
-        flex: 1;
-        padding: 12px 8px;
-        font-size: 12px;
-        text-align: center;
-        min-width: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    /* 表单元素在小屏幕上的优化 */
-    .api-config-section .text_pole {
-        font-size: 14px;
+    .api-config-hero,
+    .api-config-section {
+        border-radius: 12px;
         padding: 10px;
     }
 
-    .api-config-section .menu_button {
-        padding: 12px;
-        font-size: 14px;
+    .api-config-title b {
+        font-size: 15px;
     }
 
-    /* 获取模型按钮在小屏幕上的处理 - 只影响模型输入容器 */
+    .api-config-subtitle {
+        font-size: 11px;
+    }
+
+    .api-config-version {
+        margin-left: 0;
+        margin-top: 4px;
+    }
+
+    .api-config-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .api-config-actions {
+        margin-top: 7px;
+        width: 100%;
+    }
+
+    .api-config-actions .menu_button {
+        flex: 1;
+        min-width: 0;
+        font-size: 11px;
+    }
+
     .api_config_settings .model-input-container {
         flex-direction: column !important;
-        gap: 8px !important;
-    }
-
-    /* 保存和取消按钮容器在小屏幕上仍保持横向布局 */
-    .api_config_settings .button-container {
-        flex-direction: row !important;
-        gap: 8px !important;
-        justify-content: flex-start !important;
+        align-items: stretch !important;
     }
 
     #api-config-fetch-models {
         width: 100%;
-        padding: 12px;
-        font-size: 14px;
     }
 }
