@@ -40,6 +40,11 @@ const SOURCE_SECRET_KEYS = {
     [CHAT_COMPLETION_SOURCES.MAKERSUITE]: SECRET_KEYS.MAKERSUITE,
 };
 
+const LIST_SORT_MODES = {
+    GROUP: 'group',
+    NAME: 'name',
+};
+
 const AUTO_GROUP_HOST_SKIP = new Set([
     'api',
     'www',
@@ -83,7 +88,8 @@ const EXTENSION_INFO = {
 // 默认设置
 const defaultSettings = {
     configs: [], // 存储配置列表: [{name: string, url: string, key: string, model?: string}]
-    collapsedGroups: {} // 存储折叠状态: {groupName: boolean}
+    collapsedGroups: {}, // 存储折叠状态: {groupName: boolean}
+    listSortMode: LIST_SORT_MODES.GROUP,
 };
 
 // 编辑状态
@@ -148,10 +154,20 @@ function getSourceLabel(source) {
     return SOURCE_LABELS[normalized] || SOURCE_LABELS[CHAT_COMPLETION_SOURCES.CUSTOM];
 }
 
-function toDisplayGroupName(value) {
-    const text = String(value || '').trim().toLowerCase();
+function normalizeGroupText(value) {
+    const text = String(value || '').trim();
     if (!text) return '';
-    return text.charAt(0).toUpperCase() + text.slice(1);
+    if (/^[a-z0-9][a-z0-9._-]*$/i.test(text)) {
+        return text.toLowerCase();
+    }
+    return text;
+}
+
+function detectLeadingLatinGroupFromName(name) {
+    const text = String(name || '').trim();
+    if (!text) return '';
+    const match = text.match(/^([A-Za-z][A-Za-z0-9]{1,31})(?=[\s\-_·/|:：]|$)/);
+    return match ? normalizeGroupText(match[1]) : '';
 }
 
 function detectGroupFromEndpoint(endpoint) {
@@ -173,17 +189,20 @@ function detectGroupFromEndpoint(endpoint) {
         if (AUTO_GROUP_HOST_SKIP.has(part)) continue;
         if (AUTO_GROUP_TLD_SKIP.has(part)) continue;
         if (part.length < 2) continue;
-        return toDisplayGroupName(part);
+        return normalizeGroupText(part);
     }
 
     if (parts.length >= 2) {
-        return toDisplayGroupName(parts[parts.length - 2]);
+        return normalizeGroupText(parts[parts.length - 2]);
     }
 
-    return toDisplayGroupName(parts[0]);
+    return normalizeGroupText(parts[0]);
 }
 
 function detectGroupFromName(name) {
+    const leadingLatinGroup = detectLeadingLatinGroupFromName(name);
+    if (leadingLatinGroup) return leadingLatinGroup;
+
     const text = String(name || '').trim();
     if (!text) return '';
 
@@ -198,27 +217,44 @@ function detectGroupFromName(name) {
 
     if (splitIndex > 1) {
         const candidate = text.slice(0, splitIndex).trim();
-        if (candidate.length >= 2) return candidate;
+        if (candidate.length >= 2) return normalizeGroupText(candidate);
     }
 
     const firstToken = text.split(/\s+/).find(Boolean);
     if (firstToken && firstToken.length >= 2) {
-        return firstToken;
+        return normalizeGroupText(firstToken);
     }
 
     return '';
 }
 
 function detectAutoGroup({ name, source, customUrl, reverseProxy }) {
+    const nameGroup = detectGroupFromName(name);
+    if (nameGroup) return nameGroup;
+
     const normalizedSource = normalizeSource(source);
     const endpoint = normalizedSource === CHAT_COMPLETION_SOURCES.CUSTOM ? customUrl : reverseProxy;
     const endpointGroup = detectGroupFromEndpoint(endpoint);
     if (endpointGroup) return endpointGroup;
 
-    const nameGroup = detectGroupFromName(name);
-    if (nameGroup) return nameGroup;
-
     return normalizedSource === CHAT_COMPLETION_SOURCES.MAKERSUITE ? 'Google' : 'Custom';
+}
+
+function getConfigGroup(config) {
+    if (!config || typeof config !== 'object') return '';
+    const manualGroup = String(config.group || '').trim();
+    if (manualGroup) return manualGroup;
+    return detectAutoGroup({
+        name: config.name,
+        source: config.source,
+        customUrl: typeof config.customUrl === 'string' ? config.customUrl : config.url,
+        reverseProxy: config.reverseProxy,
+    });
+}
+
+function getListSortMode() {
+    const mode = extension_settings?.[MODULE_NAME]?.listSortMode;
+    return mode === LIST_SORT_MODES.NAME ? LIST_SORT_MODES.NAME : LIST_SORT_MODES.GROUP;
 }
 
 function getModelSelectSelector(source) {
@@ -297,6 +333,11 @@ function initSettings() {
     // 确保collapsedGroups对象存在
     if (!extension_settings[MODULE_NAME].collapsedGroups) {
         extension_settings[MODULE_NAME].collapsedGroups = {};
+    }
+
+    if (!Object.values(LIST_SORT_MODES).includes(extension_settings[MODULE_NAME].listSortMode)) {
+        extension_settings[MODULE_NAME].listSortMode = LIST_SORT_MODES.GROUP;
+        saveSettingsDebounced();
     }
 
     let migrated = false;
@@ -969,7 +1010,16 @@ function renderConfigList() {
     container.empty();
 
     const configs = extension_settings[MODULE_NAME].configs;
+    const sortMode = getListSortMode();
     $('#api-config-summary-count').text(String(configs.length));
+    const sortButton = $('#api-config-sort-toggle');
+    if (sortButton.length) {
+        const isGroupSort = sortMode === LIST_SORT_MODES.GROUP;
+        sortButton
+            .toggleClass('is-group', isGroupSort)
+            .text(isGroupSort ? '按组排列' : '按名称排列')
+            .attr('title', isGroupSort ? '当前按组排列，点击切换为按名称' : '当前按名称排列，点击切换为按组');
+    }
 
     const keyword = String($('#api-config-search').val() || '').trim().toLowerCase();
     const filtered = configs
@@ -978,9 +1028,10 @@ function renderConfigList() {
             if (!keyword) return true;
             const sourceLabel = getSourceLabel(config.source);
             const endpoint = getConfigEndpointValue(config, config.source);
+            const group = getConfigGroup(config);
             const text = [
                 config.name,
-                config.group,
+                group,
                 sourceLabel,
                 endpoint,
                 config.model,
@@ -999,18 +1050,44 @@ function renderConfigList() {
         return;
     }
 
-    filtered.sort((a, b) => String(a.config.name || '').localeCompare(String(b.config.name || '')));
+    const collator = new Intl.Collator('zh-Hans-CN', { sensitivity: 'base', numeric: true });
+    const byName = (a, b) => collator.compare(String(a.config.name || ''), String(b.config.name || ''));
+    if (sortMode === LIST_SORT_MODES.GROUP) {
+        filtered.sort((a, b) => {
+            const aGroup = getConfigGroup(a.config) || '未分组';
+            const bGroup = getConfigGroup(b.config) || '未分组';
+            const groupCompare = collator.compare(aGroup, bGroup);
+            if (groupCompare !== 0) return groupCompare;
+            return byName(a, b);
+        });
+    } else {
+        filtered.sort(byName);
+    }
 
+    let lastGroup = '';
     filtered.forEach(({ config, index }) => {
         const sourceLabel = getSourceLabel(config.source);
+        const configGroup = getConfigGroup(config) || '未分组';
         const endpointSummary = normalizeSource(config.source) === CHAT_COMPLETION_SOURCES.CUSTOM
             ? (config.customUrl || config.url || '未填写Custom URL')
             : (config.reverseProxy || '默认连接');
         const displayName = escapeHtml(config.name || `配置 ${index + 1}`);
         const displaySub = escapeHtml(`${sourceLabel} · ${endpointSummary}`);
-        const groupLabel = config.group ? `<span class="api-config-provider-group">${escapeHtml(config.group)}</span>` : '';
+        const groupLabel = sortMode === LIST_SORT_MODES.NAME
+            ? `<span class="api-config-provider-group">${escapeHtml(configGroup)}</span>`
+            : '';
         const avatarText = escapeHtml((config.name || 'A').charAt(0).toLowerCase());
         const isActive = editingIndex === index ? 'is-active' : '';
+
+        if (sortMode === LIST_SORT_MODES.GROUP && configGroup !== lastGroup) {
+            const groupHeader = $(`
+                <div class="api-config-list-group-header">
+                    <span>${escapeHtml(configGroup)}</span>
+                </div>
+            `);
+            container.append(groupHeader);
+            lastGroup = configGroup;
+        }
 
         const configItem = $(`
             <div class="api-config-provider-item ${isActive}">
@@ -1046,39 +1123,108 @@ function updateEditorHeader() {
     $('#api-config-editor-mode').text(modeText);
 }
 
-function normalizePopupCloseButton(popupContent) {
-    const applyStyle = () => {
-        const popupRoot = popupContent.closest('.popup, .dialogue_popup, .modal, .popup-window');
-        const searchScope = popupRoot.length ? popupRoot : $(document.body);
-        const closeButton = searchScope.find('button, .menu_button, input[type="button"]').filter(function () {
+function toggleListSortMode() {
+    const currentMode = getListSortMode();
+    extension_settings[MODULE_NAME].listSortMode =
+        currentMode === LIST_SORT_MODES.GROUP ? LIST_SORT_MODES.NAME : LIST_SORT_MODES.GROUP;
+    saveSettingsDebounced();
+    renderConfigList();
+}
+
+function getPopupHostByContent(popupContent) {
+    if (popupContent?.closest) {
+        const host = popupContent.closest('.popup, .dialogue_popup, .modal, .popup-window');
+        if (host.length) return host;
+    }
+
+    const fallback = $('.popup:has(.api-config-popup), .dialogue_popup:has(.api-config-popup), .modal:has(.api-config-popup), .popup-window:has(.api-config-popup)').last();
+    return fallback;
+}
+
+function closeApiConfigPopup() {
+    const popupHost = getPopupHostByContent($('.api-config-popup'));
+    if (!popupHost.length) return;
+
+    const closeByText = popupHost
+        .find('button, .menu_button, input[type="button"], .popup-button, a')
+        .filter(function () {
             const text = String($(this).text() || $(this).val() || '').trim();
-            return text === '关闭';
+            return text === '关闭' || text.toLowerCase() === 'close';
+        })
+        .not('#api-config-close-inline')
+        .last();
+
+    if (closeByText.length) {
+        closeByText.trigger('click');
+        return;
+    }
+
+    const closeIcon = popupHost.find('.popup_close, .dialogue_popup_close, .fa-xmark, .fa-times').first();
+    if (closeIcon.length) {
+        closeIcon.trigger('click');
+        return;
+    }
+
+    $(document).trigger($.Event('keydown', { key: 'Escape', code: 'Escape', which: 27, keyCode: 27 }));
+}
+
+function normalizePopupCloseButton(popupContent) {
+    const forceButtonStyles = (buttons) => {
+        const styleEntries = [
+            ['min-width', '96px'],
+            ['width', 'auto'],
+            ['max-width', 'none'],
+            ['height', '36px'],
+            ['padding', '0 12px'],
+            ['border-radius', '10px'],
+            ['border', '1px solid #2f3a4a'],
+            ['background', '#131923'],
+            ['color', '#eff4ff'],
+            ['white-space', 'nowrap'],
+            ['word-break', 'keep-all'],
+            ['writing-mode', 'horizontal-tb'],
+            ['text-orientation', 'mixed'],
+            ['line-height', '1.2'],
+            ['display', 'inline-flex'],
+            ['align-items', 'center'],
+            ['justify-content', 'center'],
+        ];
+
+        buttons.each(function () {
+            for (const [key, value] of styleEntries) {
+                this.style.setProperty(key, value, 'important');
+            }
+        });
+    };
+
+    const applyStyle = () => {
+        const popupRoot = getPopupHostByContent(popupContent);
+        if (popupRoot.length) {
+            popupRoot.addClass('api-config-popup-host');
+        }
+
+        const searchScope = popupRoot.length ? popupRoot : $(document.body);
+        const footerButtons = searchScope.find(
+            '.popup-button-container button, .popup-button-container .menu_button, .popup-controls button, .popup-controls .menu_button, .dialogue_popup_buttons button, .dialogue_popup_buttons .menu_button, .popup-button'
+        );
+        footerButtons.addClass('api-config-popup-action-btn');
+        forceButtonStyles(footerButtons);
+
+        const closeButton = footerButtons.filter(function () {
+            const text = String($(this).text() || $(this).val() || '').trim();
+            return text === '关闭' || text.toLowerCase() === 'close';
         }).last();
 
         if (!closeButton.length) return false;
 
-        closeButton.css({
-            minWidth: '96px',
-            whiteSpace: 'nowrap',
-            writingMode: 'horizontal-tb',
-            lineHeight: '1.2',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '0 12px',
-            height: '36px',
-            borderRadius: '10px',
-            border: '1px solid #2f3a4a',
-            background: '#131923',
-            color: '#eff4ff',
-        });
+        closeButton.addClass('api-config-popup-close-btn');
+        forceButtonStyles(closeButton);
 
         return true;
     };
 
-    if (!applyStyle()) {
-        setTimeout(applyStyle, 40);
-        setTimeout(applyStyle, 140);
+    for (const delay of [0, 50, 140, 320, 700, 1200]) {
+        setTimeout(applyStyle, delay);
     }
 }
 
@@ -1149,6 +1295,9 @@ function buildPopupSettingsHtml() {
                         <i class="fa-solid fa-magnifying-glass"></i>
                         <input id="api-config-search" type="text" class="text_pole" placeholder="搜索模型平台...">
                     </div>
+                    <div class="api-config-sidebar-actions">
+                        <button id="api-config-sort-toggle" class="menu_button api-config-sort-toggle">按组排列</button>
+                    </div>
                     <div id="api-config-list" class="api-config-provider-list"></div>
                     <button id="api-config-new-entry" class="menu_button api-config-new-entry">
                         <i class="fa-solid fa-plus"></i> 添加
@@ -1165,6 +1314,9 @@ function buildPopupSettingsHtml() {
                             <span id="api-config-source-chip" class="api-config-source-chip is-custom">当前来源：Custom</span>
                             <button id="api-config-update" class="menu_button api-config-update-btn" title="检查并更新扩展">
                                 <i class="fa-solid fa-download"></i>
+                            </button>
+                            <button id="api-config-close-inline" class="menu_button api-config-close-inline" title="关闭面板">
+                                关闭
                             </button>
                         </div>
                     </div>
@@ -1290,10 +1442,18 @@ function bindEvents() {
     // 配置搜索
     $(document).on('input', '#api-config-search', renderConfigList);
 
+    // 切换排序模式
+    $(document).on('click', '#api-config-sort-toggle', toggleListSortMode);
+
     // 左侧新增按钮
     $(document).on('click', '#api-config-new-entry', function () {
         cancelEditConfig(false);
         $('#api-config-name').focus();
+    });
+
+    // 右上角关闭按钮
+    $(document).on('click', '#api-config-close-inline', function () {
+        closeApiConfigPopup();
     });
 
     // 取消编辑配置
