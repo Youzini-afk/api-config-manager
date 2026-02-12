@@ -87,6 +87,9 @@ const OPTIONS_MENU_SELECTOR = '#options .options-content';
 const OPTIONS_MENU_ITEM_ID = 'option_api_config_manager';
 const INLINE_API_ENTRY_ID = 'api_config_manager_inline_entry';
 const INLINE_API_ENTRY_OPEN_BTN_ID = 'api_config_manager_inline_open';
+const INLINE_API_LEGACY_SAVE_BTN_ID = 'api-config-legacy-save';
+const INLINE_API_LEGACY_CANCEL_BTN_ID = 'api-config-legacy-cancel';
+const INLINE_API_LEGACY_LIST_ID = 'api-config-legacy-list';
 
 // 扩展信息
 const EXTENSION_INFO = {
@@ -109,6 +112,7 @@ const defaultSettings = {
 let editingIndex = -1;
 let activePopupContent = null;
 let mobilePaneMode = MOBILE_PANES.LIST;
+let legacyEditingIndex = -1;
 
 async function findExistingSecretIdByValue(key, value) {
     const secrets = Array.isArray(secret_state?.[key]) ? secret_state[key] : [];
@@ -1003,6 +1007,204 @@ function saveNewConfig() {
     }
 }
 
+function setLegacyEditMode(isEditing) {
+    $(`#${INLINE_API_LEGACY_SAVE_BTN_ID}`).text(isEditing ? '更新配置' : '保存配置');
+    $(`#${INLINE_API_LEGACY_CANCEL_BTN_ID}`).toggle(isEditing);
+}
+
+function resetLegacyForm() {
+    legacyEditingIndex = -1;
+    $('#api-config-legacy-name').val('');
+    $('#api-config-legacy-url').val('');
+    $('#api-config-legacy-key').val('');
+    $('#api-config-legacy-model').val('');
+    $('#api-config-legacy-model-select').hide().empty().append('<option value="">选择模型...</option>');
+    setLegacyEditMode(false);
+}
+
+function buildLegacyCustomConfig(name, customUrl, key, model) {
+    const autoGroup = detectAutoGroup({
+        name,
+        source: CHAT_COMPLETION_SOURCES.CUSTOM,
+        customUrl,
+        reverseProxy: '',
+    });
+
+    return {
+        name,
+        group: autoGroup || undefined,
+        source: CHAT_COMPLETION_SOURCES.CUSTOM,
+        url: customUrl,
+        customUrl,
+        key,
+        reverseProxy: undefined,
+        proxyPassword: undefined,
+        model: model || undefined,
+        secretId: undefined,
+        secretIds: undefined,
+    };
+}
+
+function saveLegacyConfig() {
+    const name = String($('#api-config-legacy-name').val() || '').trim();
+    const customUrl = String($('#api-config-legacy-url').val() || '').trim();
+    const key = String($('#api-config-legacy-key').val() || '').trim();
+    const model = String($('#api-config-legacy-model').val() || '').trim();
+
+    if (!name) {
+        toastr.error('请输入配置名称', 'API配置管理器');
+        return;
+    }
+
+    if (!customUrl && !key) {
+        toastr.error('请至少输入URL或密钥', 'API配置管理器');
+        return;
+    }
+
+    const config = buildLegacyCustomConfig(name, customUrl, key, model);
+    const configs = extension_settings[MODULE_NAME].configs;
+    const targetIndex = (legacyEditingIndex >= 0 && legacyEditingIndex < configs.length)
+        ? legacyEditingIndex
+        : configs.findIndex(c => c.name === name);
+
+    if (targetIndex >= 0) {
+        const previousConfig = configs[targetIndex];
+        const secretKey = SOURCE_SECRET_KEYS[CHAT_COMPLETION_SOURCES.CUSTOM];
+        const prevSource = normalizeSource(previousConfig?.source);
+        const prevSecretId =
+            (previousConfig?.secretIds && typeof previousConfig.secretIds === 'object' && secretKey ? previousConfig.secretIds[secretKey] : null) ||
+            previousConfig?.secretId;
+
+        if (prevSecretId && previousConfig?.key === config.key && prevSource === CHAT_COMPLETION_SOURCES.CUSTOM) {
+            config.secretId = previousConfig.secretId;
+            config.secretIds = previousConfig.secretIds;
+        }
+
+        configs[targetIndex] = config;
+        toastr.success(`已更新配置: ${name}`, 'API配置管理器');
+    } else {
+        configs.push(config);
+        toastr.success(`已保存配置: ${name}`, 'API配置管理器');
+    }
+
+    saveSettingsDebounced();
+    resetLegacyForm();
+    renderConfigList();
+}
+
+function editLegacyConfig(index) {
+    const config = extension_settings[MODULE_NAME].configs[index];
+    if (!config) return;
+
+    if (normalizeSource(config.source) !== CHAT_COMPLETION_SOURCES.CUSTOM) {
+        toastr.info('该配置不是Custom类型，请在新面板中编辑', 'API配置管理器');
+        return;
+    }
+
+    legacyEditingIndex = index;
+    $('#api-config-legacy-name').val(config.name || '');
+    $('#api-config-legacy-url').val((typeof config.customUrl === 'string' ? config.customUrl : config.url) || '');
+    $('#api-config-legacy-key').val(config.key || '');
+    $('#api-config-legacy-model').val(config.model || '');
+    setLegacyEditMode(true);
+}
+
+async function fetchLegacyModels() {
+    const customUrl = String($('#api-config-legacy-url').val() || '').trim();
+    const apiKey = String($('#api-config-legacy-key').val() || '').trim();
+    if (!customUrl) {
+        toastr.error('请先输入URL', 'API配置管理器');
+        return;
+    }
+
+    const button = $('#api-config-legacy-fetch-models');
+    const originalText = button.text();
+    button.text('获取中...').prop('disabled', true);
+
+    try {
+        if (apiKey) {
+            await ensureSecretActive(SECRET_KEYS.CUSTOM, apiKey, 'ACM: Legacy fetch models');
+        }
+
+        const response = await fetch('/api/backends/chat-completions/status', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({
+                chat_completion_source: CHAT_COMPLETION_SOURCES.CUSTOM,
+                custom_url: customUrl,
+            }),
+            cache: 'no-cache',
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        if (data.error || !Array.isArray(data.data)) {
+            throw new Error('API连接失败，请检查URL和密钥');
+        }
+
+        const modelSelect = $('#api-config-legacy-model-select');
+        modelSelect.empty().append('<option value="">选择模型...</option>');
+
+        const models = data.data.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+        for (const model of models) {
+            const modelId = String(model.id || '');
+            modelSelect.append($('<option></option>').val(modelId).text(modelId));
+        }
+        modelSelect.show();
+        toastr.success(`已获取到 ${models.length} 个模型`, 'API配置管理器');
+    } catch (error) {
+        console.error('经典模式获取模型失败:', error);
+        toastr.error(`获取模型失败: ${error.message}`, 'API配置管理器');
+    } finally {
+        button.text(originalText).prop('disabled', false);
+    }
+}
+
+function renderLegacyInlineList() {
+    const container = $(`#${INLINE_API_LEGACY_LIST_ID}`);
+    if (!container.length) return;
+
+    const configs = extension_settings[MODULE_NAME].configs;
+    const activeConfigIndex = findActiveConfigIndex(configs);
+    container.empty();
+
+    if (!configs.length) {
+        container.append('<div class="api-config-empty">暂无已保存配置</div>');
+        return;
+    }
+
+    configs.forEach((config, index) => {
+        const source = normalizeSource(config.source);
+        const endpoint = source === CHAT_COMPLETION_SOURCES.CUSTOM
+            ? (config.customUrl || config.url || '未填写URL')
+            : (config.reverseProxy || '默认连接');
+        const model = config.model || '未设置模型';
+        const canEditInLegacy = source === CHAT_COMPLETION_SOURCES.CUSTOM;
+        const stateText = activeConfigIndex === index ? 'ON' : 'OFF';
+        const stateClass = activeConfigIndex === index ? 'is-on' : 'is-off';
+
+        const item = $(`
+            <div class="api-config-legacy-item">
+                <div class="api-config-legacy-item-top">
+                    <div class="api-config-legacy-item-name">${escapeHtml(config.name || `配置 ${index + 1}`)}</div>
+                    <span class="api-config-provider-state ${stateClass}">${stateText}</span>
+                </div>
+                <div class="api-config-legacy-item-sub">URL: ${escapeHtml(endpoint)}</div>
+                <div class="api-config-legacy-item-sub">模型: ${escapeHtml(model)}</div>
+                <div class="api-config-legacy-item-actions">
+                    <button class="menu_button api-config-legacy-apply" data-index="${index}">应用</button>
+                    <button class="menu_button api-config-legacy-edit" data-index="${index}" ${canEditInLegacy ? '' : 'disabled'}>编辑</button>
+                    <button class="menu_button api-config-legacy-delete" data-index="${index}">删除</button>
+                </div>
+            </div>
+        `);
+        container.append(item);
+    });
+}
+
 function updateFormBySource(sourceValue) {
     const source = normalizeSource(sourceValue);
 
@@ -1210,6 +1412,7 @@ function renderConfigList() {
     const activeConfigIndex = findActiveConfigIndex(configs);
     $('#api-config-summary-count').text(String(configs.length));
     $('#api-config-inline-count').text(String(configs.length));
+    renderLegacyInlineList();
     const sortButton = $('#api-config-sort-toggle');
     if (sortButton.length) {
         const buttonLabelMap = {
@@ -1772,6 +1975,38 @@ function buildInlineApiEntryHtml() {
             <button id="${INLINE_API_ENTRY_OPEN_BTN_ID}" class="menu_button api-config-inline-launcher-btn">
                 打开配置面板
             </button>
+            <div class="inline-drawer api-config-legacy-drawer">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <b>经典配置方式</b>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                </div>
+                <div class="inline-drawer-content">
+                    <div class="api-config-legacy-section">
+                        <h4>添加或编辑配置</h4>
+                        <div class="flex-container flexFlowColumn flexGap5">
+                            <input type="text" id="api-config-legacy-name" placeholder="配置名称" class="text_pole">
+                            <input type="text" id="api-config-legacy-url" placeholder="API URL (例如: https://api.openai.com/v1)" class="text_pole">
+                            <input type="password" id="api-config-legacy-key" placeholder="API密钥 (可选)" class="text_pole">
+                            <div class="flex-container flexGap5">
+                                <input type="text" id="api-config-legacy-model" placeholder="首选模型 (可选)" class="text_pole" style="flex: 1;">
+                                <button id="api-config-legacy-fetch-models" class="menu_button" style="white-space: nowrap;">获取模型</button>
+                            </div>
+                            <select id="api-config-legacy-model-select" class="text_pole" style="display: none;">
+                                <option value="">选择模型...</option>
+                            </select>
+                            <div class="flex-container flexGap5">
+                                <button id="${INLINE_API_LEGACY_SAVE_BTN_ID}" class="menu_button">保存配置</button>
+                                <button id="${INLINE_API_LEGACY_CANCEL_BTN_ID}" class="menu_button" style="display: none;">取消编辑</button>
+                            </div>
+                        </div>
+                        <small>经典方式默认保存为Custom配置；Google AI Studio请使用上方新面板。</small>
+                    </div>
+                    <div class="api-config-legacy-section">
+                        <h4>已保存配置</h4>
+                        <div id="${INLINE_API_LEGACY_LIST_ID}" class="api-config-legacy-list"></div>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
 }
@@ -1805,6 +2040,8 @@ function scheduleEnsureInlineApiEntry() {
     const tryAttach = () => {
         if (ensureInlineApiEntry()) {
             $('#api-config-inline-count').text(String(extension_settings[MODULE_NAME].configs.length));
+            resetLegacyForm();
+            renderLegacyInlineList();
             return;
         }
 
@@ -1874,6 +2111,41 @@ function bindEvents() {
 
     // 保存新配置
     $(document).on('click', '#api-config-save', saveNewConfig);
+    $(document).on('click', `#${INLINE_API_LEGACY_SAVE_BTN_ID}`, saveLegacyConfig);
+    $(document).on('click', `#${INLINE_API_LEGACY_CANCEL_BTN_ID}`, resetLegacyForm);
+    $(document).on('click', '#api-config-legacy-fetch-models', fetchLegacyModels);
+
+    // 经典方式列表操作
+    $(document).on('click', '.api-config-legacy-edit', function () {
+        const index = Number($(this).data('index'));
+        if (!Number.isInteger(index) || index < 0) return;
+        editLegacyConfig(index);
+    });
+
+    $(document).on('click', '.api-config-legacy-delete', function () {
+        const index = Number($(this).data('index'));
+        if (!Number.isInteger(index) || index < 0) return;
+
+        const beforeLength = extension_settings[MODULE_NAME].configs.length;
+        deleteConfig(index);
+        if (extension_settings[MODULE_NAME].configs.length >= beforeLength) return;
+
+        if (legacyEditingIndex === index) {
+            resetLegacyForm();
+        } else if (legacyEditingIndex > index) {
+            legacyEditingIndex -= 1;
+            setLegacyEditMode(true);
+        }
+        renderLegacyInlineList();
+    });
+
+    $(document).on('click', '.api-config-legacy-apply', async function () {
+        const index = Number($(this).data('index'));
+        if (!Number.isInteger(index) || index < 0) return;
+        const config = extension_settings[MODULE_NAME].configs[index];
+        if (!config) return;
+        await applyConfig(config);
+    });
 
     // 配置搜索
     $(document).on('input', '#api-config-search', renderConfigList);
@@ -1935,6 +2207,12 @@ function bindEvents() {
             $('#api-config-model').val(selectedModel);
         }
     });
+    $(document).on('change', '#api-config-legacy-model-select', function () {
+        const selectedModel = String($(this).val() || '');
+        if (selectedModel) {
+            $('#api-config-legacy-model').val(selectedModel);
+        }
+    });
 
     // 编辑配置
     $(document).on('click', '.api-config-edit', function() {
@@ -1981,6 +2259,11 @@ function bindEvents() {
     $(document).on('keypress', '#api-config-name, #api-config-url, #api-config-key, #api-config-reverse-proxy, #api-config-proxy-password, #api-config-model', function(e) {
         if (e.which === 13) {
             saveNewConfig();
+        }
+    });
+    $(document).on('keypress', '#api-config-legacy-name, #api-config-legacy-url, #api-config-legacy-key, #api-config-legacy-model', function (e) {
+        if (e.which === 13) {
+            saveLegacyConfig();
         }
     });
 

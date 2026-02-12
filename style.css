@@ -55,6 +55,98 @@
     white-space: nowrap;
 }
 
+.api-config-legacy-drawer {
+    margin-top: 10px;
+    border: 1px solid #2b3444;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #0c1119;
+}
+
+.api-config-legacy-drawer .inline-drawer-header {
+    padding: 8px 10px;
+    font-size: 13px;
+    color: #e7efff;
+}
+
+.api-config-legacy-drawer .inline-drawer-content {
+    padding: 10px;
+}
+
+.api-config-legacy-section + .api-config-legacy-section {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #1f2735;
+}
+
+.api-config-legacy-section h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: #edf4ff;
+}
+
+.api-config-legacy-section small {
+    display: block;
+    margin-top: 8px;
+    color: #9aabc4;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.api-config-legacy-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 340px;
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.api-config-legacy-item {
+    border: 1px solid #2a3341;
+    border-radius: 10px;
+    background: #0f151f;
+    padding: 8px;
+}
+
+.api-config-legacy-item-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.api-config-legacy-item-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #f4f8ff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.api-config-legacy-item-sub {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #a0afc7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.api-config-legacy-item-actions {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+}
+
+.api-config-legacy-item-actions .menu_button {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    border-radius: 8px;
+}
+
 .api-config-shell {
     display: grid;
     grid-template-columns: 300px 1fr;
@@ -908,6 +1000,36 @@
     }
 
     .api-config-inline-launcher-btn {
+        height: 32px;
+        font-size: 12px;
+    }
+
+    .api-config-legacy-drawer .inline-drawer-header {
+        font-size: 12px;
+        padding: 7px 9px;
+    }
+
+    .api-config-legacy-drawer .inline-drawer-content {
+        padding: 9px;
+    }
+
+    .api-config-legacy-section h4 {
+        font-size: 12px;
+    }
+
+    .api-config-legacy-item {
+        padding: 9px;
+    }
+
+    .api-config-legacy-item-name {
+        font-size: 13px;
+    }
+
+    .api-config-legacy-item-sub {
+        font-size: 11px;
+    }
+
+    .api-config-legacy-item-actions .menu_button {
         height: 32px;
         font-size: 12px;
     }
