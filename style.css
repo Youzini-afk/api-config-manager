@@ -61,6 +61,35 @@
     min-height: 620px;
 }
 
+.api-config-mobile-nav {
+    display: none;
+}
+
+.api-config-mobile-tab {
+    border: 1px solid #2a3340;
+    background: #101723;
+    color: #d7e4ff;
+    border-radius: 10px;
+    height: 34px;
+    padding: 0 10px !important;
+    font-size: 12px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.api-config-mobile-tab i {
+    font-size: 11px;
+}
+
+.api-config-mobile-tab.is-active {
+    border-color: #2e90ff;
+    background: rgba(46, 144, 255, 0.16);
+    color: #8fd0ff;
+}
+
 .api-config-sidebar {
     background: linear-gradient(180deg, #0d1118, #0a0d13);
     border-right: 1px solid #1d2530;
@@ -602,12 +631,60 @@
 @media (max-width: 720px) {
     .api-config-popup {
         border-radius: 12px;
+        width: 100%;
+        max-width: 100%;
         max-height: calc(100vh - 8px);
-        overflow: auto;
+        overflow: hidden;
     }
 
     .api-config-shell {
+        display: block;
+        min-height: 0;
         max-height: none;
+    }
+
+    .api-config-mobile-nav {
+        display: flex;
+        gap: 6px;
+        padding: 8px;
+        border-bottom: 1px solid #1d2530;
+        background: #0b1018;
+    }
+
+    .api-config-mobile-tab {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .api-config-popup.is-mobile-layout .api-config-sidebar,
+    .api-config-popup.is-mobile-layout .api-config-main {
+        display: none;
+        border: none;
+    }
+
+    .api-config-popup.is-mobile-layout.is-mobile-pane-list .api-config-sidebar {
+        display: flex;
+    }
+
+    .api-config-popup.is-mobile-layout.is-mobile-pane-editor .api-config-main {
+        display: block;
+    }
+
+    .api-config-popup.is-mobile-layout .api-config-sidebar,
+    .api-config-popup.is-mobile-layout .api-config-main {
+        padding: 10px;
+    }
+
+    .api-config-popup.is-mobile-layout .api-config-provider-list {
+        height: min(52vh, 420px);
+        max-height: min(52vh, 420px);
+        padding-right: 0;
+    }
+
+    .api-config-popup.is-mobile-layout .api-config-main {
+        max-height: calc(100vh - 176px);
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
     .api-config-sidebar {
@@ -662,6 +739,10 @@
         padding-bottom: 8px;
     }
 
+    .api-config-main-title {
+        width: 100%;
+    }
+
     .api-config-main-tools {
         width: 100%;
         justify-content: flex-start;
@@ -672,6 +753,10 @@
     .api-config-source-chip {
         font-size: 11px;
         padding: 3px 8px;
+        max-width: calc(100% - 38px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .api-config-update-btn {

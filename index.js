@@ -48,6 +48,11 @@ const LIST_SORT_MODES = {
 
 const USAGE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_USAGE_EVENTS = 2000;
+const MOBILE_LAYOUT_MAX_WIDTH = 720;
+const MOBILE_PANES = {
+    LIST: 'list',
+    EDITOR: 'editor',
+};
 
 const AUTO_GROUP_HOST_SKIP = new Set([
     'api',
@@ -102,6 +107,8 @@ const defaultSettings = {
 
 // 编辑状态
 let editingIndex = -1;
+let activePopupContent = null;
+let mobilePaneMode = MOBILE_PANES.LIST;
 
 async function findExistingSecretIdByValue(key, value) {
     const secrets = Array.isArray(secret_state?.[key]) ? secret_state[key] : [];
@@ -990,6 +997,7 @@ function saveNewConfig() {
     updateFormBySource($('#api-config-source').val());
     updateEditorHeader();
     renderConfigList();
+    refreshMobileLayoutState(MOBILE_PANES.LIST);
     if (usedAutoGroup) {
         toastr.info(`已自动识别分组: ${autoGroup}`, 'API配置管理器');
     }
@@ -1418,6 +1426,44 @@ function toggleListSortMode() {
     renderConfigList();
 }
 
+function isMobileLayoutViewport() {
+    return window.matchMedia(`(max-width: ${MOBILE_LAYOUT_MAX_WIDTH}px)`).matches;
+}
+
+function setMobilePane(pane) {
+    if (!activePopupContent?.length || !activePopupContent.hasClass('is-mobile-layout')) {
+        return;
+    }
+
+    mobilePaneMode = pane === MOBILE_PANES.EDITOR ? MOBILE_PANES.EDITOR : MOBILE_PANES.LIST;
+
+    activePopupContent
+        .toggleClass('is-mobile-pane-list', mobilePaneMode === MOBILE_PANES.LIST)
+        .toggleClass('is-mobile-pane-editor', mobilePaneMode === MOBILE_PANES.EDITOR);
+
+    const tabs = activePopupContent.find('.api-config-mobile-tab');
+    tabs.removeClass('is-active').attr('aria-pressed', 'false');
+    activePopupContent
+        .find(`.api-config-mobile-tab[data-pane="${mobilePaneMode}"]`)
+        .addClass('is-active')
+        .attr('aria-pressed', 'true');
+}
+
+function refreshMobileLayoutState(preferredPane) {
+    if (!activePopupContent?.length) return;
+
+    const useMobileLayout = isMobileLayoutViewport();
+    activePopupContent.toggleClass('is-mobile-layout', useMobileLayout);
+
+    if (!useMobileLayout) {
+        activePopupContent.removeClass('is-mobile-pane-list is-mobile-pane-editor');
+        return;
+    }
+
+    const targetPane = preferredPane || (editingIndex >= 0 ? MOBILE_PANES.EDITOR : mobilePaneMode);
+    setMobilePane(targetPane);
+}
+
 function getPopupHostByContent(popupContent) {
     if (popupContent?.closest) {
         const host = popupContent.closest('.popup, .dialogue_popup, .modal, .popup-window');
@@ -1545,6 +1591,7 @@ function editConfig(index) {
 
     updateEditorHeader();
     renderConfigList();
+    refreshMobileLayoutState(MOBILE_PANES.EDITOR);
 }
 
 // 取消编辑配置
@@ -1567,6 +1614,7 @@ function cancelEditConfig(showToast = true) {
 
     updateEditorHeader();
     renderConfigList();
+    refreshMobileLayoutState(MOBILE_PANES.LIST);
     if (showToast) {
         toastr.info('已取消编辑，切换到新建配置模式', 'API配置管理器');
     }
@@ -1576,6 +1624,14 @@ function buildPopupSettingsHtml() {
     return `
         <div class="api_config_settings api-config-popup">
             <div class="api-config-shell">
+                <div class="api-config-mobile-nav">
+                    <button type="button" class="menu_button api-config-mobile-tab is-active" data-pane="${MOBILE_PANES.LIST}" aria-pressed="true">
+                        <i class="fa-solid fa-list"></i> 配置列表
+                    </button>
+                    <button type="button" class="menu_button api-config-mobile-tab" data-pane="${MOBILE_PANES.EDITOR}" aria-pressed="false">
+                        <i class="fa-solid fa-sliders"></i> 编辑配置
+                    </button>
+                </div>
                 <aside class="api-config-sidebar">
                     <div class="api-config-search-wrap">
                         <i class="fa-solid fa-magnifying-glass"></i>
@@ -1753,19 +1809,31 @@ function scheduleEnsureInlineApiEntry() {
 async function openConfigPopup() {
     editingIndex = -1;
     const popupContent = $(buildPopupSettingsHtml());
+    activePopupContent = popupContent;
+    mobilePaneMode = MOBILE_PANES.LIST;
+    const openInMobile = isMobileLayoutViewport();
     const popupPromise = callPopup(popupContent, 'text', '', {
         okButton: '关闭',
-        wide: true,
-        large: true,
+        wide: !openInMobile,
+        large: !openInMobile,
         allowVerticalScrolling: true,
     });
 
     updateFormBySource($('#api-config-source').val());
     updateEditorHeader();
     renderConfigList();
+    refreshMobileLayoutState(MOBILE_PANES.LIST);
     normalizePopupCloseButton(popupContent);
 
-    await popupPromise;
+    const onResize = () => refreshMobileLayoutState();
+    $(window).off('resize.api_config_popup_mobile').on('resize.api_config_popup_mobile', onResize);
+
+    try {
+        await popupPromise;
+    } finally {
+        $(window).off('resize.api_config_popup_mobile', onResize);
+        activePopupContent = null;
+    }
 }
 
 // 创建UI
@@ -1805,7 +1873,14 @@ function bindEvents() {
     // 左侧新增按钮
     $(document).on('click', '#api-config-new-entry', function () {
         cancelEditConfig(false);
+        refreshMobileLayoutState(MOBILE_PANES.EDITOR);
         $('#api-config-name').focus();
+    });
+
+    // 移动端列表/编辑切换
+    $(document).on('click', '.api-config-mobile-tab', function () {
+        const pane = String($(this).data('pane') || '');
+        setMobilePane(pane);
     });
 
     // 取消编辑配置
