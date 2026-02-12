@@ -1388,7 +1388,6 @@ function editConfig(index) {
 
     updateEditorHeader();
     renderConfigList();
-    toastr.info(`正在编辑配置: ${config.name}`, 'API配置管理器');
 }
 
 // 取消编辑配置
