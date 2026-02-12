@@ -961,32 +961,9 @@ function saveNewConfig() {
         $('#api-config-save').text('保存配置'); // 重置按钮文本
         $('#api-config-cancel').hide(); // 隐藏取消按钮
     } else {
-        // 检查是否已存在同名配置
-        const existingIndex = extension_settings[MODULE_NAME].configs.findIndex(c => c.name === name);
-
-        if (existingIndex >= 0) {
-            // 更新现有配置
-            const previousConfig = extension_settings[MODULE_NAME].configs[existingIndex];
-            const secretKey = SOURCE_SECRET_KEYS[source];
-            const prevSource = normalizeSource(previousConfig?.source);
-            const prevSecretId =
-                (previousConfig?.secretIds && typeof previousConfig.secretIds === 'object' && secretKey ? previousConfig.secretIds[secretKey] : null) ||
-                (source === CHAT_COMPLETION_SOURCES.CUSTOM ? previousConfig?.secretId : null);
-
-            if (prevSecretId && previousConfig?.key === config.key && prevSource === source) {
-                config.secretId = previousConfig.secretId;
-                config.secretIds = previousConfig.secretIds;
-            }
-
-            extension_settings[MODULE_NAME].configs[existingIndex] = config;
-            const syncCount = maybeSyncConfigsWithSameEndpoint(existingIndex, previousConfig, config);
-            toastr.success(`已更新配置: ${name}`, 'API配置管理器');
-            showEndpointSyncToastIfNeeded(syncCount, source);
-        } else {
-            // 添加新配置
-            extension_settings[MODULE_NAME].configs.push(config);
-            toastr.success(`已保存配置: ${name}`, 'API配置管理器');
-        }
+        // 新建模式：允许同名配置共存
+        extension_settings[MODULE_NAME].configs.push(config);
+        toastr.success(`已保存配置: ${name}`, 'API配置管理器');
     }
 
     saveSettingsDebounced();
@@ -1106,7 +1083,7 @@ function saveLegacyConfig() {
     const configs = extension_settings[MODULE_NAME].configs;
     const targetIndex = (legacyEditingIndex >= 0 && legacyEditingIndex < configs.length)
         ? legacyEditingIndex
-        : configs.findIndex(c => c.name === name);
+        : -1;
 
     if (targetIndex >= 0) {
         const previousConfig = configs[targetIndex];
@@ -1603,13 +1580,15 @@ function renderConfigList() {
 
     let lastGroup = '';
     ordered.forEach(({ config, index, groupName }) => {
+        const source = normalizeSource(config.source);
         const configGroup = groupName || '未分组';
-        const endpointSummary = normalizeSource(config.source) === CHAT_COMPLETION_SOURCES.CUSTOM
+        const endpointSummary = source === CHAT_COMPLETION_SOURCES.CUSTOM
             ? (config.customUrl || config.url || '未填写Custom URL')
             : (config.reverseProxy || '默认连接');
+        const endpointLabel = source === CHAT_COMPLETION_SOURCES.CUSTOM ? 'URL' : '反代地址';
         const modelSummary = config.model || '未设置模型';
         const displayName = escapeHtml(config.name || `配置 ${index + 1}`);
-        const displayEndpoint = escapeHtml(`URL: ${endpointSummary}`);
+        const displayEndpoint = escapeHtml(`${endpointLabel}: ${endpointSummary}`);
         const displayModel = escapeHtml(`模型: ${modelSummary}`);
         const groupLabel = sortMode !== LIST_SORT_MODES.GROUP
             ? `<span class="api-config-provider-group">${escapeHtml(configGroup)}</span>`
