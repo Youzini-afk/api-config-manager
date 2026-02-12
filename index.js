@@ -1101,19 +1101,27 @@ function renderConfigList() {
                 </div>
                 <div class="api-config-provider-right">
                     <span class="api-config-provider-state">ON</span>
-                    <div class="api-config-provider-actions">
-                        <button class="menu_button api-config-apply api-config-apply-primary" data-index="${index}" title="应用配置">
-                            <i class="fa-solid fa-bolt"></i> 应用配置
-                        </button>
-                        <button class="menu_button api-config-delete" data-index="${index}" title="删除配置">
-                            <i class="fa-solid fa-minus"></i>
-                        </button>
-                    </div>
                 </div>
             </div>
         `);
         container.append(configItem);
     });
+}
+
+function updateEditorActionButtons() {
+    const hasSelection = editingIndex >= 0;
+    const applyBtn = $('#api-config-apply-current');
+    const deleteBtn = $('#api-config-delete-current');
+
+    if (!applyBtn.length || !deleteBtn.length) return;
+
+    if (hasSelection) {
+        applyBtn.show().attr('data-index', String(editingIndex));
+        deleteBtn.show().attr('data-index', String(editingIndex));
+    } else {
+        applyBtn.hide().removeAttr('data-index');
+        deleteBtn.hide().removeAttr('data-index');
+    }
 }
 
 function updateEditorHeader() {
@@ -1123,6 +1131,7 @@ function updateEditorHeader() {
 
     $('#api-config-editor-name').text(displayName);
     $('#api-config-editor-mode').text(modeText);
+    updateEditorActionButtons();
 }
 
 function toggleListSortMode() {
@@ -1369,6 +1378,14 @@ function buildPopupSettingsHtml() {
                         <div class="flex-container flexGap5 button-container">
                             <button id="api-config-save" class="menu_button"><i class="fa-solid fa-floppy-disk"></i> 保存配置</button>
                             <button id="api-config-cancel" class="menu_button" style="display: none;"><i class="fa-solid fa-ban"></i> 取消</button>
+                            <div class="api-config-editor-actions">
+                                <button id="api-config-apply-current" class="menu_button" style="display: none;">
+                                    <i class="fa-solid fa-bolt"></i> 应用配置
+                                </button>
+                                <button id="api-config-delete-current" class="menu_button" style="display: none;" title="删除当前配置">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -1500,23 +1517,32 @@ function bindEvents() {
         }
     });
 
-    // 应用配置
-    $(document).on('click', '.api-config-apply', async function() {
-        const index = parseInt($(this).data('index'));
-        const config = extension_settings[MODULE_NAME].configs[index];
-        await applyConfig(config);
-    });
-
     // 编辑配置
     $(document).on('click', '.api-config-edit', function() {
         const index = parseInt($(this).data('index'));
         editConfig(index);
     });
 
-    // 删除配置
-    $(document).on('click', '.api-config-delete', function() {
-        const index = parseInt($(this).data('index'));
-        deleteConfig(index);
+    // 编辑区应用当前配置
+    $(document).on('click', '#api-config-apply-current', async function() {
+        if (editingIndex < 0) {
+            toastr.info('请先从左侧选择一个配置', 'API配置管理器');
+            return;
+        }
+
+        const config = extension_settings[MODULE_NAME].configs[editingIndex];
+        if (!config) return;
+        await applyConfig(config);
+    });
+
+    // 编辑区删除当前配置
+    $(document).on('click', '#api-config-delete-current', function() {
+        if (editingIndex < 0) {
+            toastr.info('请先从左侧选择一个配置', 'API配置管理器');
+            return;
+        }
+
+        deleteConfig(editingIndex);
     });
 
     // 回车保存配置
