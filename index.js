@@ -1211,10 +1211,14 @@ function renderLegacyInlineList() {
 
     configs.forEach((config, index) => {
         const source = normalizeSource(config.source);
+        const reverseProxyValue = String(config.reverseProxy || '').trim();
+        const hasReverseProxy = reverseProxyValue.length > 0;
         const endpoint = source === CHAT_COMPLETION_SOURCES.CUSTOM
             ? (config.customUrl || config.url || '未填写URL')
-            : (config.reverseProxy || '默认连接');
-        const endpointLabel = source === CHAT_COMPLETION_SOURCES.CUSTOM ? 'URL' : '反代地址';
+            : (hasReverseProxy ? reverseProxyValue : '默认连接（非反代）');
+        const endpointLabel = source === CHAT_COMPLETION_SOURCES.CUSTOM
+            ? 'URL'
+            : (hasReverseProxy ? '反代地址' : '连接方式');
         const model = config.model || '未设置模型';
         const sourceLabel = getSourceLabel(source);
         const stateText = activeConfigIndex === index ? 'ON' : 'OFF';
@@ -1581,11 +1585,15 @@ function renderConfigList() {
     let lastGroup = '';
     ordered.forEach(({ config, index, groupName }) => {
         const source = normalizeSource(config.source);
+        const reverseProxyValue = String(config.reverseProxy || '').trim();
+        const hasReverseProxy = reverseProxyValue.length > 0;
         const configGroup = groupName || '未分组';
         const endpointSummary = source === CHAT_COMPLETION_SOURCES.CUSTOM
             ? (config.customUrl || config.url || '未填写Custom URL')
-            : (config.reverseProxy || '默认连接');
-        const endpointLabel = source === CHAT_COMPLETION_SOURCES.CUSTOM ? 'URL' : '反代地址';
+            : (hasReverseProxy ? reverseProxyValue : '默认连接（非反代）');
+        const endpointLabel = source === CHAT_COMPLETION_SOURCES.CUSTOM
+            ? 'URL'
+            : (hasReverseProxy ? '反代地址' : '连接方式');
         const modelSummary = config.model || '未设置模型';
         const displayName = escapeHtml(config.name || `配置 ${index + 1}`);
         const displayEndpoint = escapeHtml(`${endpointLabel}: ${endpointSummary}`);
