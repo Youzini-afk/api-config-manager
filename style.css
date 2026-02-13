@@ -92,6 +92,10 @@
     color: #edf4ff;
 }
 
+.api-config-legacy-list-tools {
+    margin-bottom: 8px;
+}
+
 .api-config-legacy-section small {
     display: block;
     margin-top: 8px;

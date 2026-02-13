@@ -90,6 +90,7 @@ const INLINE_API_ENTRY_OPEN_BTN_ID = 'api_config_manager_inline_open';
 const INLINE_API_LEGACY_SAVE_BTN_ID = 'api-config-legacy-save';
 const INLINE_API_LEGACY_CANCEL_BTN_ID = 'api-config-legacy-cancel';
 const INLINE_API_LEGACY_LIST_ID = 'api-config-legacy-list';
+const INLINE_API_LEGACY_SORT_BTN_ID = 'api-config-legacy-sort-toggle';
 
 // 扩展信息
 const EXTENSION_INFO = {
@@ -274,6 +275,32 @@ function getConfigGroup(config) {
 function getListSortMode() {
     const mode = extension_settings?.[MODULE_NAME]?.listSortMode;
     return Object.values(LIST_SORT_MODES).includes(mode) ? mode : LIST_SORT_MODES.GROUP;
+}
+
+function updateSortToggleButtons() {
+    const sortMode = getListSortMode();
+    const buttonLabelMap = {
+        [LIST_SORT_MODES.GROUP]: '按组排列',
+        [LIST_SORT_MODES.USAGE]: '按习惯排列',
+        [LIST_SORT_MODES.NAME]: '按名称排列',
+    };
+    const nextModeMap = {
+        [LIST_SORT_MODES.GROUP]: LIST_SORT_MODES.USAGE,
+        [LIST_SORT_MODES.USAGE]: LIST_SORT_MODES.NAME,
+        [LIST_SORT_MODES.NAME]: LIST_SORT_MODES.GROUP,
+    };
+    const currentLabel = buttonLabelMap[sortMode] || '按组排列';
+    const nextLabel = buttonLabelMap[nextModeMap[sortMode]] || '按组排列';
+
+    const buttons = $(`#api-config-sort-toggle, #${INLINE_API_LEGACY_SORT_BTN_ID}`);
+    buttons.each(function () {
+        const btn = $(this);
+        btn
+            .toggleClass('is-group', sortMode === LIST_SORT_MODES.GROUP)
+            .toggleClass('is-usage', sortMode === LIST_SORT_MODES.USAGE)
+            .text(currentLabel)
+            .attr('title', `当前${currentLabel}，点击切换为${nextLabel}`);
+    });
 }
 
 function getModelSelectSelector(source) {
@@ -1201,7 +1228,9 @@ function renderLegacyInlineList() {
     if (!container.length) return;
 
     const configs = extension_settings[MODULE_NAME].configs;
+    const sortMode = getListSortMode();
     const activeConfigIndex = findActiveConfigIndex(configs);
+    updateSortToggleButtons();
     container.empty();
 
     if (!configs.length) {
@@ -1209,7 +1238,90 @@ function renderLegacyInlineList() {
         return;
     }
 
-    configs.forEach((config, index) => {
+    const collator = new Intl.Collator('zh-Hans-CN', { sensitivity: 'base', numeric: true });
+    const usageHistory = getUsageHistory();
+    const now = Date.now();
+    const enhanced = configs.map((config, index) => ({
+        config,
+        index,
+        groupName: getConfigGroup(config) || '未分组',
+        usageScore: getConfigUsageScore(config, now, usageHistory),
+    }));
+
+    const byName = (a, b) => collator.compare(String(a.config.name || ''), String(b.config.name || ''));
+    const byUsageThenName = (a, b) => {
+        if (b.usageScore !== a.usageScore) return b.usageScore - a.usageScore;
+        return byName(a, b);
+    };
+
+    const ordered = [];
+    const groupedHeaderNames = new Set();
+
+    if (sortMode === LIST_SORT_MODES.GROUP) {
+        const groupMap = new Map();
+        for (const item of enhanced) {
+            const key = item.groupName;
+            if (!groupMap.has(key)) {
+                groupMap.set(key, []);
+            }
+            groupMap.get(key).push(item);
+        }
+
+        const multiGroups = [];
+        const singleItems = [];
+
+        for (const [groupName, items] of groupMap.entries()) {
+            if (items.length > 1) {
+                multiGroups.push({
+                    groupName,
+                    items,
+                    groupUsage: items.reduce((sum, it) => sum + it.usageScore, 0),
+                });
+            } else {
+                singleItems.push(items[0]);
+            }
+        }
+
+        const buckets = [
+            ...multiGroups.map(group => ({
+                type: 'group',
+                key: group.groupName,
+                rank: group.groupUsage,
+                group,
+            })),
+            ...singleItems.map(item => ({
+                type: 'single',
+                key: String(item.config?.name || ''),
+                rank: item.usageScore,
+                item,
+            })),
+        ];
+
+        buckets.sort((a, b) => {
+            if (b.rank !== a.rank) return b.rank - a.rank;
+            return collator.compare(a.key, b.key);
+        });
+
+        for (const bucket of buckets) {
+            if (bucket.type === 'group') {
+                const group = bucket.group;
+                group.items.sort(byUsageThenName);
+                groupedHeaderNames.add(group.groupName);
+                ordered.push(...group.items);
+            } else {
+                ordered.push(bucket.item);
+            }
+        }
+    } else if (sortMode === LIST_SORT_MODES.USAGE) {
+        enhanced.sort(byUsageThenName);
+        ordered.push(...enhanced);
+    } else {
+        enhanced.sort(byName);
+        ordered.push(...enhanced);
+    }
+
+    let lastGroup = '';
+    ordered.forEach(({ config, index, groupName }) => {
         const source = normalizeSource(config.source);
         const reverseProxyValue = String(config.reverseProxy || '').trim();
         const hasReverseProxy = reverseProxyValue.length > 0;
@@ -1223,6 +1335,12 @@ function renderLegacyInlineList() {
         const sourceLabel = getSourceLabel(source);
         const stateText = activeConfigIndex === index ? 'ON' : 'OFF';
         const stateClass = activeConfigIndex === index ? 'is-on' : 'is-off';
+        const configGroup = groupName || '未分组';
+        const shouldShowGroupHeader = sortMode === LIST_SORT_MODES.GROUP && groupedHeaderNames.has(configGroup);
+        if (shouldShowGroupHeader && configGroup !== lastGroup) {
+            container.append(`<div class="api-config-list-group-header"><span>${escapeHtml(configGroup)}</span></div>`);
+            lastGroup = configGroup;
+        }
 
         const item = $(`
             <div class="api-config-legacy-item">
@@ -1452,25 +1570,7 @@ function renderConfigList() {
     $('#api-config-summary-count').text(String(configs.length));
     $('#api-config-inline-count').text(String(configs.length));
     renderLegacyInlineList();
-    const sortButton = $('#api-config-sort-toggle');
-    if (sortButton.length) {
-        const buttonLabelMap = {
-            [LIST_SORT_MODES.GROUP]: '按组排列',
-            [LIST_SORT_MODES.USAGE]: '按习惯排列',
-            [LIST_SORT_MODES.NAME]: '按名称排列',
-        };
-        const nextModeMap = {
-            [LIST_SORT_MODES.GROUP]: LIST_SORT_MODES.USAGE,
-            [LIST_SORT_MODES.USAGE]: LIST_SORT_MODES.NAME,
-            [LIST_SORT_MODES.NAME]: LIST_SORT_MODES.GROUP,
-        };
-        const nextLabel = buttonLabelMap[nextModeMap[sortMode]] || '按组排列';
-        sortButton
-            .toggleClass('is-group', sortMode === LIST_SORT_MODES.GROUP)
-            .toggleClass('is-usage', sortMode === LIST_SORT_MODES.USAGE)
-            .text(buttonLabelMap[sortMode] || '按组排列')
-            .attr('title', `当前${buttonLabelMap[sortMode] || '按组排列'}，点击切换为${nextLabel}`);
-    }
+    updateSortToggleButtons();
 
     const keyword = String($('#api-config-search').val() || '').trim().toLowerCase();
     const filtered = configs
@@ -2057,6 +2157,9 @@ function buildInlineApiEntryHtml() {
                     </div>
                     <div class="api-config-legacy-section">
                         <h4>已保存配置</h4>
+                        <div class="api-config-legacy-list-tools">
+                            <button id="${INLINE_API_LEGACY_SORT_BTN_ID}" class="menu_button api-config-sort-toggle">按组排列</button>
+                        </div>
                         <div id="${INLINE_API_LEGACY_LIST_ID}" class="api-config-legacy-list"></div>
                     </div>
                 </div>
@@ -2206,6 +2309,7 @@ function bindEvents() {
 
     // 切换排序模式
     $(document).on('click', '#api-config-sort-toggle', toggleListSortMode);
+    $(document).on('click', `#${INLINE_API_LEGACY_SORT_BTN_ID}`, toggleListSortMode);
 
     // 左侧新增按钮
     $(document).on('click', '#api-config-new-entry', function () {
