@@ -94,6 +94,32 @@
 
 .api-config-legacy-list-tools {
     margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#api-config-legacy-sort-toggle {
+    flex: 1;
+    min-width: 180px;
+}
+
+.api-config-legacy-visible-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #a5b4cc;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+#api-config-legacy-visible-count {
+    width: 72px;
+    min-width: 72px;
+    height: 32px;
+    padding: 0 8px;
+    text-align: center;
 }
 
 .api-config-legacy-section small {
@@ -108,7 +134,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 340px;
+    max-height: 900px;
     overflow: auto;
     padding-right: 2px;
 }
@@ -1038,6 +1064,27 @@
 
     .api-config-inline-launcher-tip {
         font-size: 10px;
+    }
+
+    .api-config-legacy-list-tools {
+        gap: 6px;
+    }
+
+    #api-config-legacy-sort-toggle {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .api-config-legacy-visible-control {
+        width: 100%;
+        justify-content: flex-end;
+        font-size: 11px;
+    }
+
+    #api-config-legacy-visible-count {
+        width: 64px;
+        min-width: 64px;
+        height: 30px;
     }
 
     .api-config-legacy-drawer .inline-drawer-header {

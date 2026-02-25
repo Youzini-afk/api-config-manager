@@ -91,6 +91,7 @@ const INLINE_API_LEGACY_SAVE_BTN_ID = 'api-config-legacy-save';
 const INLINE_API_LEGACY_CANCEL_BTN_ID = 'api-config-legacy-cancel';
 const INLINE_API_LEGACY_LIST_ID = 'api-config-legacy-list';
 const INLINE_API_LEGACY_SORT_BTN_ID = 'api-config-legacy-sort-toggle';
+const INLINE_API_LEGACY_VISIBLE_COUNT_ID = 'api-config-legacy-visible-count';
 
 // 扩展信息
 const EXTENSION_INFO = {
@@ -107,6 +108,7 @@ const defaultSettings = {
     listSortMode: LIST_SORT_MODES.GROUP,
     lastAppliedSignature: null,
     usageHistory: [],
+    legacyVisibleCount: 6,
 };
 
 // 编辑状态
@@ -275,6 +277,33 @@ function getConfigGroup(config) {
 function getListSortMode() {
     const mode = extension_settings?.[MODULE_NAME]?.listSortMode;
     return Object.values(LIST_SORT_MODES).includes(mode) ? mode : LIST_SORT_MODES.GROUP;
+}
+
+function normalizeLegacyVisibleCount(value) {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(parsed)) return 6;
+    return Math.min(20, Math.max(2, parsed));
+}
+
+function getLegacyVisibleCount() {
+    return normalizeLegacyVisibleCount(extension_settings?.[MODULE_NAME]?.legacyVisibleCount);
+}
+
+function setLegacyVisibleCount(value) {
+    extension_settings[MODULE_NAME].legacyVisibleCount = normalizeLegacyVisibleCount(value);
+    saveSettingsDebounced();
+}
+
+function updateLegacyListViewportHeight() {
+    const container = $(`#${INLINE_API_LEGACY_LIST_ID}`);
+    if (!container.length) return;
+
+    const visibleCount = getLegacyVisibleCount();
+    const firstItem = container.children('.api-config-legacy-item').first();
+    const estimatedItemHeight = firstItem.length ? Math.ceil(firstItem.outerHeight(true)) : 150;
+    const maxHeight = Math.max(260, estimatedItemHeight * visibleCount + 12);
+
+    container.css('max-height', `${maxHeight}px`);
 }
 
 function updateSortToggleButtons() {
@@ -540,6 +569,12 @@ function initSettings() {
             extension_settings[MODULE_NAME].usageHistory = normalizedHistory;
             migrated = true;
         }
+    }
+
+    const normalizedLegacyVisibleCount = normalizeLegacyVisibleCount(extension_settings[MODULE_NAME].legacyVisibleCount);
+    if (normalizedLegacyVisibleCount !== extension_settings[MODULE_NAME].legacyVisibleCount) {
+        extension_settings[MODULE_NAME].legacyVisibleCount = normalizedLegacyVisibleCount;
+        migrated = true;
     }
 
     // 兼容旧配置结构
@@ -1230,11 +1265,14 @@ function renderLegacyInlineList() {
     const configs = extension_settings[MODULE_NAME].configs;
     const sortMode = getListSortMode();
     const activeConfigIndex = findActiveConfigIndex(configs);
+    const visibleCount = getLegacyVisibleCount();
     updateSortToggleButtons();
+    $(`#${INLINE_API_LEGACY_VISIBLE_COUNT_ID}`).val(String(visibleCount));
     container.empty();
 
     if (!configs.length) {
         container.append('<div class="api-config-empty">暂无已保存配置</div>');
+        updateLegacyListViewportHeight();
         return;
     }
 
@@ -1360,6 +1398,8 @@ function renderLegacyInlineList() {
         `);
         container.append(item);
     });
+
+    updateLegacyListViewportHeight();
 }
 
 function updateFormBySource(sourceValue) {
@@ -2159,6 +2199,11 @@ function buildInlineApiEntryHtml() {
                         <h4>已保存配置</h4>
                         <div class="api-config-legacy-list-tools">
                             <button id="${INLINE_API_LEGACY_SORT_BTN_ID}" class="menu_button api-config-sort-toggle">按组排列</button>
+                            <label class="api-config-legacy-visible-control" for="${INLINE_API_LEGACY_VISIBLE_COUNT_ID}">
+                                显示
+                                <input id="${INLINE_API_LEGACY_VISIBLE_COUNT_ID}" type="number" min="2" max="20" step="1" value="6" class="text_pole">
+                                条
+                            </label>
                         </div>
                         <div id="${INLINE_API_LEGACY_LIST_ID}" class="api-config-legacy-list"></div>
                     </div>
@@ -2310,6 +2355,12 @@ function bindEvents() {
     // 切换排序模式
     $(document).on('click', '#api-config-sort-toggle', toggleListSortMode);
     $(document).on('click', `#${INLINE_API_LEGACY_SORT_BTN_ID}`, toggleListSortMode);
+    $(document).on('change', `#${INLINE_API_LEGACY_VISIBLE_COUNT_ID}`, function () {
+        const normalized = normalizeLegacyVisibleCount($(this).val());
+        $(this).val(String(normalized));
+        setLegacyVisibleCount(normalized);
+        updateLegacyListViewportHeight();
+    });
 
     // 左侧新增按钮
     $(document).on('click', '#api-config-new-entry', function () {
