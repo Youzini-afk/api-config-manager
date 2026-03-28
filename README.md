@@ -24,8 +24,8 @@
   - 移动端采用列表/编辑切屏逻辑，减少布局溢出。
   - 列表项支持更大卡片与项内“应用配置”按钮。
 - 隐私与安全：
-  - 密钥通过 SillyTavern 的 secrets 机制读写。
-  - 配置存储在本地 `extension_settings`。
+  - API 密钥与反代密码通过 SillyTavern 的 secrets 机制读写。
+  - 非敏感配置存储在本地 `extension_settings`。
 
 ## 安装
 
@@ -88,7 +88,7 @@ SillyTavern/public/scripts/extensions/api-config-manager/
 
 - 配置保存在 `extension_settings.api-config-manager`。
 - 使用历史仅用于本地排序（最近 7 天窗口）。
-- 密钥通过 SillyTavern secrets 系统管理。
+- API 密钥与反代密码通过 SillyTavern secrets 系统管理。
 
 详细隐私说明：`PRIVACY.md`
 

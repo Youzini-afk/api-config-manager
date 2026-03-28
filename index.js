@@ -4,11 +4,13 @@ import { SECRET_KEYS, writeSecret, findSecret, readSecretState, secret_state } f
 
 // Import rotateSecret if available (added in newer SillyTavern versions)
 let rotateSecret = null;
+let deleteSecret = null;
 try {
     const secretsModule = await import('../../../../../scripts/secrets.js');
     rotateSecret = secretsModule.rotateSecret || null;
+    deleteSecret = secretsModule.deleteSecret || null;
 } catch (e) {
-    console.log('rotateSecret not available in this SillyTavern version');
+    console.log('Optional secrets helpers are not available in this SillyTavern version');
 }
 import { oai_settings } from '../../../../../scripts/openai.js';
 
@@ -38,6 +40,12 @@ const SOURCE_MODEL_SETTING_KEYS = {
 const SOURCE_SECRET_KEYS = {
     [CHAT_COMPLETION_SOURCES.CUSTOM]: SECRET_KEYS.CUSTOM,
     [CHAT_COMPLETION_SOURCES.MAKERSUITE]: SECRET_KEYS.MAKERSUITE,
+};
+
+const STORED_SECRET_KEYS = {
+    [CHAT_COMPLETION_SOURCES.CUSTOM]: `${MODULE_NAME}_custom_api_key`,
+    [CHAT_COMPLETION_SOURCES.MAKERSUITE]: `${MODULE_NAME}_makersuite_api_key`,
+    MAKERSUITE_PROXY_PASSWORD: `${MODULE_NAME}_makersuite_proxy_password`,
 };
 
 const LIST_SORT_MODES = {
@@ -102,20 +110,23 @@ const EXTENSION_INFO = {
 };
 
 // 默认设置
-const defaultSettings = {
-    configs: [], // 存储配置列表: [{name: string, url: string, key: string, model?: string}]
-    collapsedGroups: {}, // 存储折叠状态: {groupName: boolean}
-    listSortMode: LIST_SORT_MODES.GROUP,
-    lastAppliedSignature: null,
-    usageHistory: [],
-    legacyVisibleCount: 6,
-};
+function createDefaultSettings() {
+    return {
+        configs: [],
+        collapsedGroups: {},
+        listSortMode: LIST_SORT_MODES.GROUP,
+        lastAppliedSignature: null,
+        usageHistory: [],
+        legacyVisibleCount: 6,
+    };
+}
 
 // 编辑状态
 let editingIndex = -1;
 let activePopupContent = null;
 let mobilePaneMode = MOBILE_PANES.LIST;
 let legacyEditingIndex = -1;
+let applyOperationCounter = 0;
 
 async function findExistingSecretIdByValue(key, value) {
     const secrets = Array.isArray(secret_state?.[key]) ? secret_state[key] : [];
@@ -148,9 +159,7 @@ async function findExistingSecretIdByValue(key, value) {
 async function ensureSecretActive(key, value, label) {
     if (!value) return null;
 
-    if (!secret_state || Object.keys(secret_state).length === 0) {
-        await readSecretState();
-    }
+    await ensureSecretStateLoaded();
 
     const existingId = await findExistingSecretIdByValue(key, value);
     if (existingId) {
@@ -161,6 +170,295 @@ async function ensureSecretActive(key, value, label) {
     }
 
     return await writeSecret(key, value, label);
+}
+
+async function ensureSecretStateLoaded() {
+    if (!secret_state || Object.keys(secret_state).length === 0) {
+        await readSecretState();
+    }
+}
+
+function getSecretsForKey(key) {
+    return Array.isArray(secret_state?.[key]) ? secret_state[key] : [];
+}
+
+function getActiveSecretId(key) {
+    const activeSecret = getSecretsForKey(key).find(secret => secret?.active);
+    return activeSecret?.id || null;
+}
+
+async function rotateSecretById(key, id) {
+    if (!key || !id || !rotateSecret) return false;
+
+    await ensureSecretStateLoaded();
+    const hasSecret = getSecretsForKey(key).some(secret => secret?.id === id);
+    if (!hasSecret) return false;
+
+    await rotateSecret(key, id);
+    await ensureSecretStateLoaded();
+    return true;
+}
+
+async function deleteSecretById(key, id) {
+    if (!key || !id || !deleteSecret) return;
+    try {
+        await deleteSecret(key, id);
+    } catch (error) {
+        console.warn(`Failed to delete temporary secret for ${key}:`, error);
+    } finally {
+        await ensureSecretStateLoaded();
+    }
+}
+
+function getStoredApiSecretKey(source) {
+    return STORED_SECRET_KEYS[normalizeSource(source)] || STORED_SECRET_KEYS[CHAT_COMPLETION_SOURCES.CUSTOM];
+}
+
+function getRuntimeApiSecretKey(source) {
+    return SOURCE_SECRET_KEYS[normalizeSource(source)] || SOURCE_SECRET_KEYS[CHAT_COMPLETION_SOURCES.CUSTOM];
+}
+
+function ensureSecretIdsObject(config) {
+    if (!config || typeof config !== 'object') return {};
+    if (!config.secretIds || typeof config.secretIds !== 'object' || Array.isArray(config.secretIds)) {
+        config.secretIds = {};
+    }
+    return config.secretIds;
+}
+
+function setConfigSecretId(config, secretKey, id) {
+    if (!config || typeof config !== 'object' || !secretKey) return;
+
+    const secretIds = ensureSecretIdsObject(config);
+    if (id) {
+        secretIds[secretKey] = id;
+    } else {
+        delete secretIds[secretKey];
+    }
+
+    if (Object.keys(secretIds).length === 0) {
+        config.secretIds = undefined;
+    }
+}
+
+function getLegacyRuntimeSecretId(config, source) {
+    if (!config || typeof config !== 'object') return null;
+    const normalized = normalizeSource(source);
+    const runtimeKey = getRuntimeApiSecretKey(normalized);
+
+    if (config.secretIds && typeof config.secretIds === 'object' && config.secretIds[runtimeKey]) {
+        return config.secretIds[runtimeKey];
+    }
+
+    if (normalized === CHAT_COMPLETION_SOURCES.CUSTOM && config.secretId) {
+        return config.secretId;
+    }
+
+    return null;
+}
+
+function getStoredSourceSecretId(config, source) {
+    if (!config || typeof config !== 'object') return null;
+    const storedKey = getStoredApiSecretKey(source);
+    if (config.secretIds && typeof config.secretIds === 'object' && config.secretIds[storedKey]) {
+        return config.secretIds[storedKey];
+    }
+    return getLegacyRuntimeSecretId(config, source);
+}
+
+function getStoredProxyPasswordSecretId(config) {
+    if (!config || typeof config !== 'object') return null;
+    if (config.secretIds && typeof config.secretIds === 'object' && config.secretIds[STORED_SECRET_KEYS.MAKERSUITE_PROXY_PASSWORD]) {
+        return config.secretIds[STORED_SECRET_KEYS.MAKERSUITE_PROXY_PASSWORD];
+    }
+    return null;
+}
+
+function clearLegacySecretReferences(config, source) {
+    if (!config || typeof config !== 'object') return;
+
+    const runtimeKey = getRuntimeApiSecretKey(source);
+    if (config.secretIds && typeof config.secretIds === 'object') {
+        delete config.secretIds[runtimeKey];
+        if (Object.keys(config.secretIds).length === 0) {
+            config.secretIds = undefined;
+        }
+    }
+
+    if (normalizeSource(source) === CHAT_COMPLETION_SOURCES.CUSTOM) {
+        config.secretId = undefined;
+    }
+}
+
+async function readConfigSecretValue(secretKey, secretId) {
+    if (!secretKey || !secretId) return '';
+    try {
+        const value = await findSecret(secretKey, secretId);
+        return String(value || '').trim();
+    } catch {
+        return '';
+    }
+}
+
+async function readStoredSourceSecretValue(config, source) {
+    if (!config || typeof config !== 'object') return '';
+
+    const normalized = normalizeSource(source);
+    const storedKey = getStoredApiSecretKey(normalized);
+    const storedId = config.secretIds?.[storedKey];
+    if (storedId) {
+        const storedValue = await readConfigSecretValue(storedKey, storedId);
+        if (storedValue) return storedValue;
+    }
+
+    const legacyRuntimeId = getLegacyRuntimeSecretId(config, normalized);
+    if (legacyRuntimeId) {
+        const legacyValue = await readConfigSecretValue(getRuntimeApiSecretKey(normalized), legacyRuntimeId);
+        if (legacyValue) return legacyValue;
+    }
+
+    return String(config.key || '').trim();
+}
+
+async function readStoredProxyPasswordValue(config) {
+    if (!config || typeof config !== 'object') return '';
+
+    const storedId = getStoredProxyPasswordSecretId(config);
+    if (storedId) {
+        const storedValue = await readConfigSecretValue(STORED_SECRET_KEYS.MAKERSUITE_PROXY_PASSWORD, storedId);
+        if (storedValue) return storedValue;
+    }
+
+    return String(config.proxyPassword || '').trim();
+}
+
+async function storeConfigSecretValue(secretKey, value, label) {
+    const normalizedValue = String(value || '').trim();
+    if (!secretKey || !normalizedValue) return null;
+
+    await ensureSecretStateLoaded();
+
+    const existingId = await findExistingSecretIdByValue(secretKey, normalizedValue);
+    if (existingId) {
+        return existingId;
+    }
+
+    const secretId = await writeSecret(secretKey, normalizedValue, label);
+    await ensureSecretStateLoaded();
+    return secretId;
+}
+
+async function persistConfigSecrets(config, previousConfig = null) {
+    if (!config || typeof config !== 'object') return false;
+
+    const normalized = normalizeSource(config.source);
+    const sameSourceAsPrevious = normalizeSource(previousConfig?.source) === normalized;
+    let mutated = false;
+
+    const storedApiKey = getStoredApiSecretKey(normalized);
+    const rawApiKey = String(config.key || '').trim();
+    const preservedApiValue = sameSourceAsPrevious ? await readStoredSourceSecretValue(previousConfig, normalized) : '';
+    const nextApiSecretId = rawApiKey
+        ? await storeConfigSecretValue(storedApiKey, rawApiKey, `ACM: ${config.name || getSourceLabel(normalized)}`)
+        : (preservedApiValue
+            ? await storeConfigSecretValue(storedApiKey, preservedApiValue, `ACM: ${config.name || getSourceLabel(normalized)}`)
+            : null);
+
+    setConfigSecretId(config, storedApiKey, nextApiSecretId);
+    clearLegacySecretReferences(config, normalized);
+    if (config.key !== undefined) {
+        config.key = undefined;
+        mutated = true;
+    }
+
+    if (normalized === CHAT_COMPLETION_SOURCES.MAKERSUITE) {
+        const rawProxyPassword = String(config.proxyPassword || '').trim();
+        const preservedProxyValue = sameSourceAsPrevious ? await readStoredProxyPasswordValue(previousConfig) : '';
+        const nextProxySecretId = rawProxyPassword
+            ? await storeConfigSecretValue(
+                STORED_SECRET_KEYS.MAKERSUITE_PROXY_PASSWORD,
+                rawProxyPassword,
+                `ACM Proxy: ${config.name || getSourceLabel(normalized)}`
+            )
+            : (preservedProxyValue
+                ? await storeConfigSecretValue(
+                    STORED_SECRET_KEYS.MAKERSUITE_PROXY_PASSWORD,
+                    preservedProxyValue,
+                    `ACM Proxy: ${config.name || getSourceLabel(normalized)}`
+                )
+                : null);
+
+        setConfigSecretId(config, STORED_SECRET_KEYS.MAKERSUITE_PROXY_PASSWORD, nextProxySecretId);
+        if (config.proxyPassword !== undefined) {
+            config.proxyPassword = undefined;
+            mutated = true;
+        }
+    } else {
+        if (getStoredProxyPasswordSecretId(config)) {
+            setConfigSecretId(config, STORED_SECRET_KEYS.MAKERSUITE_PROXY_PASSWORD, null);
+            mutated = true;
+        }
+        if (config.proxyPassword !== undefined) {
+            config.proxyPassword = undefined;
+            mutated = true;
+        }
+    }
+
+    if (nextApiSecretId || rawApiKey) {
+        mutated = true;
+    }
+
+    return mutated;
+}
+
+async function activateSourceSecretValue(source, configName, value) {
+    const runtimeKey = getRuntimeApiSecretKey(source);
+    if (!runtimeKey || !value) return null;
+    return await ensureSecretActive(runtimeKey, value, `ACM: ${configName || getSourceLabel(source)}`);
+}
+
+async function withTemporarySourceSecret(source, value, config, task) {
+    const runtimeKey = getRuntimeApiSecretKey(source);
+    if (!runtimeKey) {
+        return await task();
+    }
+
+    const normalizedValue = String(value || '').trim() || await readStoredSourceSecretValue(config, source);
+    if (!normalizedValue) {
+        return await task();
+    }
+
+    await ensureSecretStateLoaded();
+
+    const previousActiveId = getActiveSecretId(runtimeKey);
+    let targetSecretId = null;
+    let tempSecretId = null;
+
+    if (previousActiveId) {
+        const existingId = await findExistingSecretIdByValue(runtimeKey, normalizedValue);
+        targetSecretId = existingId || await writeSecret(runtimeKey, normalizedValue, 'ACM: Temporary runtime secret');
+        tempSecretId = existingId ? null : targetSecretId;
+    } else {
+        targetSecretId = await writeSecret(runtimeKey, normalizedValue, 'ACM: Temporary runtime secret');
+        tempSecretId = targetSecretId;
+    }
+
+    await ensureSecretStateLoaded();
+
+    if (rotateSecret && targetSecretId) {
+        await rotateSecret(runtimeKey, targetSecretId);
+    }
+
+    try {
+        return await task();
+    } finally {
+        if (previousActiveId) {
+            await rotateSecretById(runtimeKey, previousActiveId);
+        }
+        if (tempSecretId) {
+            await deleteSecretById(runtimeKey, tempSecretId);
+        }
+    }
 }
 
 function normalizeSource(source) {
@@ -336,14 +634,25 @@ function getModelSelectSelector(source) {
     return SOURCE_MODEL_SELECTORS[normalizeSource(source)] || SOURCE_MODEL_SELECTORS[CHAT_COMPLETION_SOURCES.CUSTOM];
 }
 
-function buildConfigRuntimeSignature(config, sourceOverride = null) {
-    const source = normalizeSource(sourceOverride ?? config?.source);
+function buildConfigRuntimeSignature(config, sourceOverride = null, overrides = {}) {
+    const source = normalizeSource(sourceOverride ?? overrides.source ?? config?.source);
     return {
         source,
-        endpoint: getConfigEndpointValue(config, source),
-        model: String(config?.model || '').trim(),
-        name: String(config?.name || '').trim(),
+        endpoint: String(overrides.endpoint ?? (getConfigEndpointValue(config, source) || '')).trim(),
+        model: String(overrides.model ?? (config?.model || '')).trim(),
+        name: String(overrides.name ?? (config?.name || '')).trim(),
     };
+}
+
+function isCurrentApplyOperation(operationId) {
+    return operationId === applyOperationCounter;
+}
+
+function isRuntimeSnapshotCompatible(signature) {
+    if (!signature || typeof signature !== 'object') return true;
+    const current = getCurrentRuntimeConnectionSnapshot();
+    return normalizeSource(signature.source) === current.source
+        && String(signature.endpoint || '').trim() === String(current.endpoint || '').trim();
 }
 
 function getCurrentRuntimeConnectionSnapshot() {
@@ -444,7 +753,15 @@ function findActiveConfigIndex(configs) {
     configs.forEach((config, index) => {
         const signature = buildConfigRuntimeSignature(config);
         if (signature.source !== current.source) return;
-        if (signature.endpoint !== current.endpoint) return;
+        const endpointMatches = signature.endpoint === current.endpoint
+            || (
+                signature.source === CHAT_COMPLETION_SOURCES.CUSTOM
+                && !signature.endpoint
+                && lastApplied
+                && String(lastApplied.name || '').trim() === String(signature.name || '').trim()
+                && String(lastApplied.endpoint || '').trim() === String(current.endpoint || '').trim()
+            );
+        if (!endpointMatches) return;
 
         let score = 1;
         if (signature.model && current.model && signature.model === current.model) {
@@ -493,44 +810,96 @@ function setReverseProxyFields(reverseProxy, proxyPassword) {
     }
 }
 
-async function setSourceSecretIfProvided(source, configName, value, config) {
+function buildStatusRequestData(source, { customUrl = '', reverseProxy = '', proxyPassword = '' } = {}) {
     const normalized = normalizeSource(source);
-    const secretKey = SOURCE_SECRET_KEYS[normalized];
-    if (!secretKey || !value) return;
+    const requestData = {
+        chat_completion_source: normalized,
+        reverse_proxy: String(reverseProxy || '').trim(),
+        proxy_password: String(proxyPassword || '').trim(),
+    };
 
-    const label = `ACM: ${configName || getSourceLabel(normalized)}`;
-
-    if (!secret_state || Object.keys(secret_state).length === 0) {
-        await readSecretState();
+    if (normalized === CHAT_COMPLETION_SOURCES.CUSTOM) {
+        requestData.custom_url = String(customUrl || '').trim();
     }
 
-    const knownId =
-        (config?.secretIds && typeof config.secretIds === 'object' && config.secretIds[secretKey]) ||
-        (normalized === CHAT_COMPLETION_SOURCES.CUSTOM ? config?.secretId : null);
+    return requestData;
+}
 
-    const secrets = Array.isArray(secret_state?.[secretKey]) ? secret_state[secretKey] : [];
-    const hasKnownSecret = knownId ? secrets.some(s => s?.id === knownId) : false;
+async function requestConnectionStatus(source, options = {}) {
+    const response = await fetch('/api/backends/chat-completions/status', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify(buildStatusRequestData(source, options)),
+        cache: 'no-cache',
+    });
 
-    if (hasKnownSecret) {
-        if (rotateSecret) {
-            await rotateSecret(secretKey, knownId);
-        }
-        return;
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const id = await ensureSecretActive(secretKey, value, label);
-    if (!id) return;
+    return await response.json();
+}
 
-    if (!config.secretIds || typeof config.secretIds !== 'object') {
-        config.secretIds = {};
+async function verifyConnectionSettings(source, options = {}) {
+    const data = await requestConnectionStatus(source, options);
+    if (data?.error) {
+        return {
+            ok: false,
+            bypass: false,
+            data,
+            errorMessage: 'API连接失败，请检查配置是否正确',
+        };
     }
-    config.secretIds[secretKey] = id;
+
+    return {
+        ok: true,
+        bypass: Boolean(data?.bypass),
+        data,
+        errorMessage: '',
+    };
+}
+
+function pushUsageSignature(signature) {
+    const now = Date.now();
+    const usageHistory = normalizeUsageHistory(extension_settings[MODULE_NAME].usageHistory, now);
+    usageHistory.push({ ts: now, signature });
+    if (usageHistory.length > MAX_USAGE_EVENTS) {
+        usageHistory.splice(0, usageHistory.length - MAX_USAGE_EVENTS);
+    }
+    extension_settings[MODULE_NAME].usageHistory = usageHistory;
+}
+
+function recordSuccessfulApply(signature) {
+    extension_settings[MODULE_NAME].lastAppliedSignature = signature;
+    pushUsageSignature(signature);
+    saveSettingsDebounced();
+    renderConfigList();
+}
+
+function getCurrentCustomEndpoint() {
+    return String(
+        $('#custom_api_url_text').val() || (typeof oai_settings !== 'undefined' ? oai_settings?.custom_url : '') || ''
+    ).trim();
+}
+
+function getResolvedCustomUrlForApply(config) {
+    const savedUrl = String((typeof config?.customUrl === 'string' ? config.customUrl : config?.url) || '').trim();
+    if (savedUrl) {
+        return { value: savedUrl, inherited: false };
+    }
+
+    const currentUrl = getCurrentCustomEndpoint();
+    if (currentUrl) {
+        return { value: currentUrl, inherited: true };
+    }
+
+    return { value: '', inherited: false };
 }
 
 // 初始化扩展设置
-function initSettings() {
+async function initSettings() {
     if (!extension_settings[MODULE_NAME]) {
-        extension_settings[MODULE_NAME] = defaultSettings;
+        extension_settings[MODULE_NAME] = createDefaultSettings();
     }
 
     let migrated = false;
@@ -597,11 +966,6 @@ function initSettings() {
             }
         }
 
-        if (config.secretId && (!config.secretIds || typeof config.secretIds !== 'object')) {
-            config.secretIds = { [SECRET_KEYS.CUSTOM]: config.secretId };
-            migrated = true;
-        }
-
         if (!String(config.group || '').trim()) {
             const autoGroup = detectAutoGroup({
                 name: config.name,
@@ -613,6 +977,10 @@ function initSettings() {
                 config.group = autoGroup;
                 migrated = true;
             }
+        }
+
+        if (await persistConfigSecrets(config, config)) {
+            migrated = true;
         }
     }
 
@@ -649,52 +1017,71 @@ async function applyConfig(config) {
         }
 
         const source = normalizeSource(rawSource);
+        const operationId = ++applyOperationCounter;
+        let resolvedEndpoint = '';
+        let resolvedProxyPassword = '';
+        let shouldPersistInheritedCustomUrl = false;
+
         setChatCompletionSource(source);
 
         if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
-            const customUrl = (typeof config.customUrl === 'string' ? config.customUrl : config.url) || '';
-            $('#custom_api_url_text').val(customUrl).trigger('input');
-            if (typeof oai_settings !== 'undefined') {
-                oai_settings.custom_url = customUrl;
+            const resolvedCustomUrl = getResolvedCustomUrlForApply(config);
+            if (!resolvedCustomUrl.value) {
+                throw new Error('Custom配置缺少URL，且当前连接页没有可继承的Custom URL');
             }
-        } else if (source === CHAT_COMPLETION_SOURCES.MAKERSUITE) {
-            setReverseProxyFields(config.reverseProxy, config.proxyPassword);
+
+            resolvedEndpoint = resolvedCustomUrl.value;
+            shouldPersistInheritedCustomUrl = resolvedCustomUrl.inherited;
+            $('#custom_api_url_text').val(resolvedEndpoint).trigger('input');
+            if (typeof oai_settings !== 'undefined') {
+                oai_settings.custom_url = resolvedEndpoint;
+            }
+        } else {
+            resolvedEndpoint = String(config.reverseProxy || '').trim();
+            resolvedProxyPassword = await readStoredProxyPasswordValue(config);
+            setReverseProxyFields(resolvedEndpoint, resolvedProxyPassword);
         }
 
-        // 通过secrets系统设置密钥（仅在配置里填写了key时覆盖/激活）
-        await setSourceSecretIfProvided(source, config.name, config.key, config);
-
-        // 记录最近一次应用的配置，用于左侧状态高亮判定
-        extension_settings[MODULE_NAME].lastAppliedSignature = buildConfigRuntimeSignature(config, source);
-        const now = Date.now();
-        const usageHistory = normalizeUsageHistory(extension_settings[MODULE_NAME].usageHistory, now);
-        usageHistory.push({
-            ts: now,
-            signature: buildConfigRuntimeSignature(config, source),
-        });
-        if (usageHistory.length > MAX_USAGE_EVENTS) {
-            usageHistory.splice(0, usageHistory.length - MAX_USAGE_EVENTS);
-        }
-        extension_settings[MODULE_NAME].usageHistory = usageHistory;
-
-        // 保存设置
-        saveSettingsDebounced();
-        renderConfigList();
-
-        // 显示应用成功消息
-        toastr.success(`正在连接到: ${config.name}（${getSourceLabel(source)}）`, 'API配置管理器');
-
-        // 如果有指定模型，先尝试设置（连接完成后会再次尝试自动选中）
-        if (config.model) {
-            setPreferredModel(config.model, config.name, source);
+        const storedApiKey = await readStoredSourceSecretValue(config, source);
+        if (storedApiKey) {
+            await activateSourceSecretValue(source, config.name, storedApiKey);
         }
 
-        // 自动重新连接
+        const appliedSignature = buildConfigRuntimeSignature(config, source, { endpoint: resolvedEndpoint });
+
+        toastr.info(`正在连接到: ${config.name}（${getSourceLabel(source)}）`, 'API配置管理器');
         $('#api_button_openai').trigger('click');
 
-        // 监听连接状态变化，连接成功后立即设置模型
+        const verification = await verifyConnectionSettings(source, {
+            customUrl: source === CHAT_COMPLETION_SOURCES.CUSTOM ? resolvedEndpoint : '',
+            reverseProxy: source === CHAT_COMPLETION_SOURCES.MAKERSUITE ? resolvedEndpoint : '',
+            proxyPassword: resolvedProxyPassword,
+        });
+
+        if (!isCurrentApplyOperation(operationId)) {
+            return;
+        }
+
+        if (!verification.ok) {
+            renderConfigList();
+            toastr.error(verification.errorMessage, 'API配置管理器');
+            return;
+        }
+
+        if (shouldPersistInheritedCustomUrl) {
+            setConfigEndpointValue(config, source, resolvedEndpoint);
+            saveSettingsDebounced();
+        }
+
+        recordSuccessfulApply(appliedSignature);
+        toastr.success(`已应用配置: ${config.name}（${getSourceLabel(source)}）`, 'API配置管理器');
+
         if (config.model) {
-            waitForConnectionAndSetModel(config.model, config.name, source);
+            setPreferredModel(config.model, config.name, source, {
+                operationId,
+                expectedSignature: appliedSignature,
+            });
+            waitForConnectionAndSetModel(config.model, config.name, source, operationId, appliedSignature);
         }
 
     } catch (error) {
@@ -704,11 +1091,14 @@ async function applyConfig(config) {
 }
 
 // 智能等待连接并设置模型
-function waitForConnectionAndSetModel(modelName, configName, source) {
+function waitForConnectionAndSetModel(modelName, configName, source, operationId = null, expectedSignature = null) {
     let attempts = 0;
     const maxAttempts = 20; // 最多尝试20次，每次500ms，总共10秒
 
     const checkConnection = () => {
+        if (operationId !== null && !isCurrentApplyOperation(operationId)) return;
+        if (expectedSignature && !isRuntimeSnapshotCompatible(expectedSignature)) return;
+
         attempts++;
 
         // 检查是否已连接（通过检查模型下拉列表是否有选项）
@@ -717,7 +1107,7 @@ function waitForConnectionAndSetModel(modelName, configName, source) {
 
         if (hasModels) {
             // 连接成功，设置模型
-            setPreferredModel(modelName, configName, source);
+            setPreferredModel(modelName, configName, source, { operationId, expectedSignature });
             return;
         }
 
@@ -726,7 +1116,7 @@ function waitForConnectionAndSetModel(modelName, configName, source) {
             setTimeout(checkConnection, 500);
         } else {
             // 超时，但仍然尝试设置模型
-            setPreferredModel(modelName, configName, source);
+            setPreferredModel(modelName, configName, source, { operationId, expectedSignature });
         }
     };
 
@@ -735,64 +1125,83 @@ function waitForConnectionAndSetModel(modelName, configName, source) {
 }
 
 // 设置首选模型
-function setPreferredModel(modelName, configName, source) {
+function setPreferredModel(modelName, configName, source, { operationId = null, expectedSignature = null } = {}) {
     try {
+        if (operationId !== null && !isCurrentApplyOperation(operationId)) {
+            return false;
+        }
+        if (expectedSignature && !isRuntimeSnapshotCompatible(expectedSignature)) {
+            return false;
+        }
+
         const normalized = normalizeSource(source);
+        const normalizedModelName = String(modelName || '').trim();
+        if (!normalizedModelName) {
+            return false;
+        }
 
         // 更新oai_settings
         if (typeof oai_settings !== 'undefined') {
             const settingKey = SOURCE_MODEL_SETTING_KEYS[normalized];
             if (settingKey) {
-                oai_settings[settingKey] = modelName;
+                oai_settings[settingKey] = normalizedModelName;
             }
         }
 
         if (normalized === CHAT_COMPLETION_SOURCES.CUSTOM) {
-            $('#custom_model_id').val(modelName).trigger('input');
+            $('#custom_model_id').val(normalizedModelName).trigger('input');
         }
 
         // 检查下拉列表中是否有该模型
         const modelSelect = $(getModelSelectSelector(normalized));
         if (!modelSelect.length) {
-            toastr.info(`已设置首选模型: ${modelName}（未找到模型下拉框，连接后可用）`, 'API配置管理器');
+            toastr.info(`已设置首选模型: ${normalizedModelName}（未找到模型下拉框，连接后可用）`, 'API配置管理器');
             saveSettingsDebounced();
-            return;
+            return true;
         }
 
-        const modelOption = modelSelect.find(`option[value="${modelName}"]`);
+        const modelOption = modelSelect
+            .find('option')
+            .filter(function () { return String($(this).val() || '') === normalizedModelName; });
 
         if (modelOption.length > 0) {
             // 模型在下拉列表中，选择它
-            modelSelect.val(modelName).trigger('change');
-            toastr.success(`已自动选择模型: ${modelName}`, 'API配置管理器');
+            modelSelect.val(normalizedModelName).trigger('change');
+            toastr.success(`已自动选择模型: ${normalizedModelName}`, 'API配置管理器');
         } else {
             // 模型不在下拉列表中：允许手动输入的来源（尤其是Custom）可以临时注入选项以便生效
             if (modelSelect.is('select')) {
-                modelSelect.append(`<option value="${modelName}">${modelName}</option>`);
-                modelSelect.val(modelName).trigger('change');
-                toastr.success(`已设置模型: ${modelName}（手动添加）`, 'API配置管理器');
+                modelSelect.append($('<option></option>').val(normalizedModelName).text(normalizedModelName));
+                modelSelect.val(normalizedModelName).trigger('change');
+                toastr.success(`已设置模型: ${normalizedModelName}（手动添加）`, 'API配置管理器');
             } else {
-                toastr.info(`已设置首选模型: ${modelName}（模型将在连接后可用）`, 'API配置管理器');
+                toastr.info(`已设置首选模型: ${normalizedModelName}（模型将在连接后可用）`, 'API配置管理器');
             }
         }
 
         // 保存设置
         saveSettingsDebounced();
+        return true;
 
     } catch (error) {
         console.error('设置模型时出错:', error);
         toastr.warning(`无法自动设置模型 ${modelName}，请手动选择`, 'API配置管理器');
+        return false;
     }
 }
 
 // 获取可用模型列表
 async function fetchAvailableModels() {
     const source = normalizeSource($('#api-config-source').val());
+    const currentEditingConfig = editingIndex >= 0 ? extension_settings[MODULE_NAME].configs[editingIndex] : null;
+    const editingConfig = currentEditingConfig && normalizeSource(currentEditingConfig.source) === source
+        ? currentEditingConfig
+        : null;
 
-    const customUrl = $('#api-config-url').val().trim();
-    const apiKey = $('#api-config-key').val().trim();
-    const reverseProxy = $('#api-config-reverse-proxy').val().trim();
-    const proxyPassword = $('#api-config-proxy-password').val().trim();
+    const customUrl = String($('#api-config-url').val() || '').trim();
+    const apiKey = String($('#api-config-key').val() || '').trim();
+    const reverseProxy = String($('#api-config-reverse-proxy').val() || '').trim();
+    let proxyPassword = String($('#api-config-proxy-password').val() || '').trim();
 
     if (source === CHAT_COMPLETION_SOURCES.CUSTOM && !customUrl) {
         toastr.error('请先输入Custom API URL', 'API配置管理器');
@@ -804,39 +1213,17 @@ async function fetchAvailableModels() {
     button.text('获取中...').prop('disabled', true);
 
     try {
-        if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
-            if (apiKey) {
-                await ensureSecretActive(SECRET_KEYS.CUSTOM, apiKey, 'ACM: Fetch models (Custom)');
-            }
-        } else if (source === CHAT_COMPLETION_SOURCES.MAKERSUITE) {
-            if (!reverseProxy && apiKey) {
-                await ensureSecretActive(SECRET_KEYS.MAKERSUITE, apiKey, 'ACM: Fetch models (AI Studio)');
-            }
+        if (!proxyPassword && reverseProxy && editingConfig && normalizeSource(editingConfig.source) === source) {
+            proxyPassword = await readStoredProxyPasswordValue(editingConfig);
         }
 
-        /** @type {any} */
-        const requestData = {
-            chat_completion_source: source,
-            reverse_proxy: reverseProxy,
-            proxy_password: proxyPassword,
-        };
-
-        if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
-            requestData.custom_url = customUrl;
-        }
-
-        const response = await fetch('/api/backends/chat-completions/status', {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify(requestData),
-            cache: 'no-cache'
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
+        const data = await withTemporarySourceSecret(source, apiKey, editingConfig, async () => (
+            await requestConnectionStatus(source, {
+                customUrl,
+                reverseProxy,
+                proxyPassword,
+            })
+        ));
 
         if (data.error) {
             throw new Error('API连接失败，请检查URL和密钥是否正确');
@@ -844,13 +1231,15 @@ async function fetchAvailableModels() {
 
         if (data.data && Array.isArray(data.data)) {
             const modelSelect = $('#api-config-model-select');
-            modelSelect.empty().append('<option value="">选择模型...</option>');
+            modelSelect.empty().append($('<option></option>').val('').text('选择模型...'));
 
             // 按模型ID排序
-            const models = data.data.sort((a, b) => a.id.localeCompare(b.id));
+            const models = data.data.sort((a, b) => String(a?.id || '').localeCompare(String(b?.id || '')));
 
             models.forEach(model => {
-                modelSelect.append(`<option value="${model.id}">${model.id}</option>`);
+                const modelId = String(model?.id || '').trim();
+                if (!modelId) return;
+                modelSelect.append($('<option></option>').val(modelId).text(modelId));
             });
 
             modelSelect.show();
@@ -952,8 +1341,59 @@ function showEndpointSyncToastIfNeeded(syncCount, source) {
     toastr.success(`已同步更新 ${syncCount} 个同${fieldLabel}配置`, 'API配置管理器');
 }
 
+function configHasStoredApiKey(config, source) {
+    const normalized = normalizeSource(source);
+    return Boolean(getStoredSourceSecretId(config, normalized) || String(config?.key || '').trim());
+}
+
+function configHasStoredProxyPassword(config) {
+    return Boolean(getStoredProxyPasswordSecretId(config) || String(config?.proxyPassword || '').trim());
+}
+
+function getEditorConfigForSource(source) {
+    if (editingIndex < 0) return null;
+    const config = extension_settings[MODULE_NAME].configs[editingIndex];
+    if (!config || normalizeSource(config.source) !== normalizeSource(source)) return null;
+    return config;
+}
+
+function getLegacyEditorConfigForSource(source) {
+    if (legacyEditingIndex < 0) return null;
+    const config = extension_settings[MODULE_NAME].configs[legacyEditingIndex];
+    if (!config || normalizeSource(config.source) !== normalizeSource(source)) return null;
+    return config;
+}
+
+function refreshEditorSensitivePlaceholders(sourceValue = $('#api-config-source').val()) {
+    const source = normalizeSource(sourceValue);
+    const config = getEditorConfigForSource(source);
+    const apiKeyPlaceholder = source === CHAT_COMPLETION_SOURCES.CUSTOM
+        ? (configHasStoredApiKey(config, source) ? '已保存Custom API密钥（留空保持不变）' : 'Custom API密钥 (可选)')
+        : (configHasStoredApiKey(config, source) ? '已保存Google AI Studio API Key（留空保持不变）' : 'Google AI Studio API Key (可选；不填则使用酒馆已保存的密钥)');
+    const proxyPasswordPlaceholder = configHasStoredProxyPassword(config)
+        ? '已保存反代密码/Token（留空保持不变）'
+        : '反代密码/Token (可选；反代需要时填写)';
+
+    $('#api-config-key').attr('placeholder', apiKeyPlaceholder);
+    $('#api-config-proxy-password').attr('placeholder', proxyPasswordPlaceholder);
+}
+
+function refreshLegacySensitivePlaceholders(sourceValue = $('#api-config-legacy-source').val()) {
+    const source = normalizeSource(sourceValue);
+    const config = getLegacyEditorConfigForSource(source);
+    const apiKeyPlaceholder = source === CHAT_COMPLETION_SOURCES.CUSTOM
+        ? (configHasStoredApiKey(config, source) ? '已保存Custom API密钥（留空保持不变）' : 'Custom API密钥 (可选)')
+        : (configHasStoredApiKey(config, source) ? '已保存Google AI Studio API Key（留空保持不变）' : 'Google AI Studio API Key (可选；不填则使用酒馆已保存的密钥)');
+    const proxyPasswordPlaceholder = configHasStoredProxyPassword(config)
+        ? '已保存反代密码/Key（留空保持不变）'
+        : '反代密码/Key (可选；反代需要时填写)';
+
+    $('#api-config-legacy-key').attr('placeholder', apiKeyPlaceholder);
+    $('#api-config-legacy-proxy-password').attr('placeholder', proxyPasswordPlaceholder);
+}
+
 // 保存新配置（从用户输入）
-function saveNewConfig() {
+async function saveNewConfig() {
     const name = $('#api-config-name').val().trim();
     const manualGroup = $('#api-config-group').val().trim();
     const source = normalizeSource($('#api-config-source').val());
@@ -1004,15 +1444,11 @@ function saveNewConfig() {
     if (editingIndex >= 0) {
         // 更新现有配置（编辑模式）
         const previousConfig = extension_settings[MODULE_NAME].configs[editingIndex];
-        const secretKey = SOURCE_SECRET_KEYS[source];
-        const prevSource = normalizeSource(previousConfig?.source);
-        const prevSecretId =
-            (previousConfig?.secretIds && typeof previousConfig.secretIds === 'object' && secretKey ? previousConfig.secretIds[secretKey] : null) ||
-            (source === CHAT_COMPLETION_SOURCES.CUSTOM ? previousConfig?.secretId : null);
-
-        if (prevSecretId && previousConfig?.key === config.key && prevSource === source) {
-            config.secretId = previousConfig.secretId;
-            config.secretIds = previousConfig.secretIds;
+        try {
+            await persistConfigSecrets(config, previousConfig);
+        } catch (error) {
+            toastr.error(`保存配置失败: ${error.message}`, 'API配置管理器');
+            return;
         }
 
         extension_settings[MODULE_NAME].configs[editingIndex] = config;
@@ -1024,6 +1460,12 @@ function saveNewConfig() {
         $('#api-config-cancel').hide(); // 隐藏取消按钮
     } else {
         // 新建模式：允许同名配置共存
+        try {
+            await persistConfigSecrets(config);
+        } catch (error) {
+            toastr.error(`保存配置失败: ${error.message}`, 'API配置管理器');
+            return;
+        }
         extension_settings[MODULE_NAME].configs.push(config);
         toastr.success(`已保存配置: ${name}`, 'API配置管理器');
     }
@@ -1036,7 +1478,7 @@ function saveNewConfig() {
     $('#api-config-reverse-proxy').val('');
     $('#api-config-proxy-password').val('');
     $('#api-config-model').val('');
-    $('#api-config-model-select').hide(); // 隐藏模型选择下拉框
+    $('#api-config-model-select').hide().empty().append($('<option></option>').val('').text('选择模型...'));
     updateFormBySource($('#api-config-source').val());
     updateEditorHeader();
     renderConfigList();
@@ -1060,9 +1502,10 @@ function resetLegacyForm() {
     $('#api-config-legacy-reverse-proxy').val('');
     $('#api-config-legacy-proxy-password').val('');
     $('#api-config-legacy-model').val('');
-    $('#api-config-legacy-model-select').hide().empty().append('<option value="">选择模型...</option>');
+    $('#api-config-legacy-model-select').hide().empty().append($('<option></option>').val('').text('选择模型...'));
     updateLegacyFormBySource(CHAT_COMPLETION_SOURCES.CUSTOM);
     setLegacyEditMode(false);
+    refreshLegacySensitivePlaceholders(CHAT_COMPLETION_SOURCES.CUSTOM);
 }
 
 function updateLegacyFormBySource(sourceValue) {
@@ -1080,17 +1523,17 @@ function updateLegacyFormBySource(sourceValue) {
 
     if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
         $customUrl.show().attr('placeholder', 'Custom API URL (例如: https://api.openai.com/v1)');
-        $apiKey.attr('placeholder', 'Custom API密钥 (可选)');
         $reverseProxy.hide();
         $proxyPassword.hide();
         $hint.text('Custom：使用OpenAI兼容接口。');
     } else {
         $customUrl.hide();
-        $apiKey.attr('placeholder', 'Google AI Studio API Key (可选；不填则使用酒馆已保存的密钥)');
         $reverseProxy.show().attr('placeholder', '反代服务器URL (可选；留空使用默认)');
-        $proxyPassword.show().attr('placeholder', '反代密码/Key (可选；反代需要时填写)');
+        $proxyPassword.show();
         $hint.text('Google AI Studio：支持直接Key或使用反代。');
     }
+
+    refreshLegacySensitivePlaceholders(source);
 }
 
 function buildLegacyConfig(name, source, customUrl, key, reverseProxy, proxyPassword, model) {
@@ -1116,7 +1559,7 @@ function buildLegacyConfig(name, source, customUrl, key, reverseProxy, proxyPass
     };
 }
 
-function saveLegacyConfig() {
+async function saveLegacyConfig() {
     const source = normalizeSource($('#api-config-legacy-source').val());
     const name = String($('#api-config-legacy-name').val() || '').trim();
     const customUrl = String($('#api-config-legacy-url').val() || '').trim();
@@ -1149,15 +1592,11 @@ function saveLegacyConfig() {
 
     if (targetIndex >= 0) {
         const previousConfig = configs[targetIndex];
-        const secretKey = SOURCE_SECRET_KEYS[source];
-        const prevSource = normalizeSource(previousConfig?.source);
-        const prevSecretId =
-            (previousConfig?.secretIds && typeof previousConfig.secretIds === 'object' && secretKey ? previousConfig.secretIds[secretKey] : null) ||
-            (source === CHAT_COMPLETION_SOURCES.CUSTOM ? previousConfig?.secretId : null);
-
-        if (prevSecretId && previousConfig?.key === config.key && prevSource === source) {
-            config.secretId = previousConfig.secretId;
-            config.secretIds = previousConfig.secretIds;
+        try {
+            await persistConfigSecrets(config, previousConfig);
+        } catch (error) {
+            toastr.error(`保存配置失败: ${error.message}`, 'API配置管理器');
+            return;
         }
 
         configs[targetIndex] = config;
@@ -1165,6 +1604,12 @@ function saveLegacyConfig() {
         toastr.success(`已更新配置: ${name}`, 'API配置管理器');
         showEndpointSyncToastIfNeeded(syncCount, source);
     } else {
+        try {
+            await persistConfigSecrets(config);
+        } catch (error) {
+            toastr.error(`保存配置失败: ${error.message}`, 'API配置管理器');
+            return;
+        }
         configs.push(config);
         toastr.success(`已保存配置: ${name}`, 'API配置管理器');
     }
@@ -1183,9 +1628,9 @@ function editLegacyConfig(index) {
     $('#api-config-legacy-source').val(source);
     $('#api-config-legacy-name').val(config.name || '');
     $('#api-config-legacy-url').val((typeof config.customUrl === 'string' ? config.customUrl : config.url) || '');
-    $('#api-config-legacy-key').val(config.key || '');
+    $('#api-config-legacy-key').val('');
     $('#api-config-legacy-reverse-proxy').val(config.reverseProxy || '');
-    $('#api-config-legacy-proxy-password').val(config.proxyPassword || '');
+    $('#api-config-legacy-proxy-password').val('');
     $('#api-config-legacy-model').val(config.model || '');
     updateLegacyFormBySource(source);
     setLegacyEditMode(true);
@@ -1193,10 +1638,14 @@ function editLegacyConfig(index) {
 
 async function fetchLegacyModels() {
     const source = normalizeSource($('#api-config-legacy-source').val());
+    const currentEditingConfig = legacyEditingIndex >= 0 ? extension_settings[MODULE_NAME].configs[legacyEditingIndex] : null;
+    const editingConfig = currentEditingConfig && normalizeSource(currentEditingConfig.source) === source
+        ? currentEditingConfig
+        : null;
     const customUrl = String($('#api-config-legacy-url').val() || '').trim();
     const apiKey = String($('#api-config-legacy-key').val() || '').trim();
     const reverseProxy = String($('#api-config-legacy-reverse-proxy').val() || '').trim();
-    const proxyPassword = String($('#api-config-legacy-proxy-password').val() || '').trim();
+    let proxyPassword = String($('#api-config-legacy-proxy-password').val() || '').trim();
 
     if (source === CHAT_COMPLETION_SOURCES.CUSTOM && !customUrl) {
         toastr.error('请先输入Custom URL', 'API配置管理器');
@@ -1208,44 +1657,29 @@ async function fetchLegacyModels() {
     button.text('获取中...').prop('disabled', true);
 
     try {
-        if (source === CHAT_COMPLETION_SOURCES.CUSTOM && apiKey) {
-            await ensureSecretActive(SECRET_KEYS.CUSTOM, apiKey, 'ACM: Legacy fetch models');
-        } else if (source === CHAT_COMPLETION_SOURCES.MAKERSUITE && !reverseProxy && apiKey) {
-            await ensureSecretActive(SECRET_KEYS.MAKERSUITE, apiKey, 'ACM: Legacy fetch models');
+        if (!proxyPassword && reverseProxy && editingConfig && normalizeSource(editingConfig.source) === source) {
+            proxyPassword = await readStoredProxyPasswordValue(editingConfig);
         }
 
-        const requestData = {
-            chat_completion_source: source,
-            reverse_proxy: reverseProxy,
-            proxy_password: proxyPassword,
-        };
+        const data = await withTemporarySourceSecret(source, apiKey, editingConfig, async () => (
+            await requestConnectionStatus(source, {
+                customUrl,
+                reverseProxy,
+                proxyPassword,
+            })
+        ));
 
-        if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
-            requestData.custom_url = customUrl;
-        }
-
-        const response = await fetch('/api/backends/chat-completions/status', {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify(requestData),
-            cache: 'no-cache',
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
         if (data.error || !Array.isArray(data.data)) {
             throw new Error('API连接失败，请检查URL和密钥');
         }
 
         const modelSelect = $('#api-config-legacy-model-select');
-        modelSelect.empty().append('<option value="">选择模型...</option>');
+        modelSelect.empty().append($('<option></option>').val('').text('选择模型...'));
 
         const models = data.data.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
         for (const model of models) {
             const modelId = String(model.id || '');
+            if (!modelId) continue;
             modelSelect.append($('<option></option>').val(modelId).text(modelId));
         }
         modelSelect.show();
@@ -1364,7 +1798,7 @@ function renderLegacyInlineList() {
         const reverseProxyValue = String(config.reverseProxy || '').trim();
         const hasReverseProxy = reverseProxyValue.length > 0;
         const endpoint = source === CHAT_COMPLETION_SOURCES.CUSTOM
-            ? (config.customUrl || config.url || '未填写URL')
+            ? (config.customUrl || config.url || '沿用当前Custom URL')
             : (hasReverseProxy ? reverseProxyValue : '默认连接（非反代）');
         const endpointLabel = source === CHAT_COMPLETION_SOURCES.CUSTOM
             ? 'URL'
@@ -1406,7 +1840,6 @@ function updateFormBySource(sourceValue) {
     const source = normalizeSource(sourceValue);
 
     const $customUrl = $('#api-config-url');
-    const $apiKey = $('#api-config-key');
     const $reverseProxy = $('#api-config-reverse-proxy');
     const $proxyPassword = $('#api-config-proxy-password');
     const $fetchModels = $('#api-config-fetch-models');
@@ -1415,7 +1848,6 @@ function updateFormBySource(sourceValue) {
 
     if (source === CHAT_COMPLETION_SOURCES.CUSTOM) {
         $customUrl.show().attr('placeholder', 'Custom API URL (例如: https://api.openai.com/v1)');
-        $apiKey.show().attr('placeholder', 'Custom API密钥 (可选)');
         $reverseProxy.hide();
         $proxyPassword.hide();
         $fetchModels.prop('disabled', false);
@@ -1423,13 +1855,14 @@ function updateFormBySource(sourceValue) {
         $sourceChip.text('当前来源：Custom').removeClass('is-makersuite').addClass('is-custom');
     } else if (source === CHAT_COMPLETION_SOURCES.MAKERSUITE) {
         $customUrl.hide();
-        $apiKey.show().attr('placeholder', 'Google AI Studio API Key (可选；不填则使用酒馆已保存的密钥)');
         $reverseProxy.show().attr('placeholder', '反代服务器URL (可选；留空使用默认)');
-        $proxyPassword.show().attr('placeholder', '反代密码/Key (可选；反代需要时填写)');
+        $proxyPassword.show();
         $fetchModels.prop('disabled', false);
         $hint.text('Google AI Studio：支持直接Key或使用反代（reverse_proxy + proxy_password）。');
         $sourceChip.text('当前来源：Google AI Studio').removeClass('is-custom').addClass('is-makersuite');
     }
+
+    refreshEditorSensitivePlaceholders(source);
 }
 
 // 检查更新
@@ -1729,7 +2162,7 @@ function renderConfigList() {
         const hasReverseProxy = reverseProxyValue.length > 0;
         const configGroup = groupName || '未分组';
         const endpointSummary = source === CHAT_COMPLETION_SOURCES.CUSTOM
-            ? (config.customUrl || config.url || '未填写Custom URL')
+            ? (config.customUrl || config.url || '沿用当前Custom URL')
             : (hasReverseProxy ? reverseProxyValue : '默认连接（非反代）');
         const endpointLabel = source === CHAT_COMPLETION_SOURCES.CUSTOM
             ? 'URL'
@@ -1963,22 +2396,23 @@ function normalizePopupCloseButton(popupContent) {
 // 编辑配置
 function editConfig(index) {
     const config = extension_settings[MODULE_NAME].configs[index];
+    if (!config) return;
 
     // 填充表单
+    editingIndex = index;
     $('#api-config-name').val(config.name);
     $('#api-config-group').val(config.group || '');
     $('#api-config-source').val(normalizeSource(config.source)).trigger('change');
     $('#api-config-url').val((typeof config.customUrl === 'string' ? config.customUrl : config.url) || '');
-    $('#api-config-key').val(config.key || '');
+    $('#api-config-key').val('');
     $('#api-config-reverse-proxy').val(config.reverseProxy || '');
-    $('#api-config-proxy-password').val(config.proxyPassword || '');
+    $('#api-config-proxy-password').val('');
     $('#api-config-model').val(config.model || '');
 
     // 隐藏模型选择下拉框
-    $('#api-config-model-select').hide();
+    $('#api-config-model-select').hide().empty().append($('<option></option>').val('').text('选择模型...'));
 
     // 设置编辑模式
-    editingIndex = index;
     $('#api-config-save').text('更新配置');
     $('#api-config-cancel').show(); // 显示取消按钮
 
@@ -2008,7 +2442,7 @@ function cancelEditConfig(showToast = true) {
     $('#api-config-reverse-proxy').val('');
     $('#api-config-proxy-password').val('');
     $('#api-config-model').val('');
-    $('#api-config-model-select').hide(); // 隐藏模型选择下拉框
+    $('#api-config-model-select').hide().empty().append($('<option></option>').val('').text('选择模型...'));
     updateFormBySource($('#api-config-source').val());
 
     updateEditorHeader();
@@ -2124,12 +2558,11 @@ function buildPopupSettingsHtml() {
 function ensureOptionsMenuEntry() {
     const optionsMenu = $(OPTIONS_MENU_SELECTOR);
     if (!optionsMenu.length) {
-        console.error('找不到左下菜单容器，无法注册API配置管理器入口');
-        return;
+        return false;
     }
 
     if ($(`#${OPTIONS_MENU_ITEM_ID}`).length) {
-        return;
+        return true;
     }
 
     const menuItemHtml = `
@@ -2145,6 +2578,8 @@ function ensureOptionsMenuEntry() {
     } else {
         optionsMenu.append(menuItemHtml);
     }
+
+    return true;
 }
 
 function buildInlineApiEntryHtml() {
@@ -2256,6 +2691,26 @@ function scheduleEnsureInlineApiEntry() {
     tryAttach();
 }
 
+function scheduleEnsureOptionsMenuEntry() {
+    let attempts = 0;
+    const maxAttempts = 20;
+
+    const tryAttach = () => {
+        if (ensureOptionsMenuEntry()) {
+            return;
+        }
+
+        attempts += 1;
+        if (attempts < maxAttempts) {
+            setTimeout(tryAttach, 1000);
+        } else {
+            console.error('找不到左下菜单容器，无法注册API配置管理器入口');
+        }
+    };
+
+    tryAttach();
+}
+
 async function openConfigPopup() {
     editingIndex = -1;
     const popupContent = $(buildPopupSettingsHtml());
@@ -2288,7 +2743,7 @@ async function openConfigPopup() {
 
 // 创建UI
 async function createUI() {
-    ensureOptionsMenuEntry();
+    scheduleEnsureOptionsMenuEntry();
     scheduleEnsureInlineApiEntry();
 }
 
@@ -2296,6 +2751,12 @@ async function createUI() {
 
 // 绑定事件
 function bindEvents() {
+    $(document).on('click', '#options_button', function () {
+        setTimeout(() => {
+            ensureOptionsMenuEntry();
+        }, 0);
+    });
+
     // 左下三条杠菜单入口
     $(document).on('click', `#${OPTIONS_MENU_ITEM_ID}`, async function (e) {
         e.preventDefault();
@@ -2485,7 +2946,7 @@ function bindEvents() {
 
 // 扩展初始化函数
 async function initExtension() {
-    initSettings();
+    await initSettings();
     await createUI();
     bindEvents();
 
@@ -2500,7 +2961,7 @@ async function initExtension() {
 // SillyTavern扩展初始化
 jQuery(async () => {
     // 检查是否被禁用
-    if (extension_settings.disabledExtensions.includes(MODULE_NAME)) {
+    if (Array.isArray(extension_settings.disabledExtensions) && extension_settings.disabledExtensions.includes(MODULE_NAME)) {
         return;
     }
 
